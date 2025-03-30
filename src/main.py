@@ -1,3 +1,16 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+SPT Asset Editor
+A tool for SPT Tarkov asset management
+
+Author: Golani11
+Copyright: © 2025 Golani11
+Version: 1.0.0
+License: MIT
+Description: SPT Asset Editor is a tool for viewing and editing textures in SPT Tarkov game files.
+"""
+
 import os
 import sys
 import time
@@ -5,6 +18,24 @@ import logging
 import traceback
 from datetime import datetime
 import platform
+
+# _version.py에서 버전 정보 가져오기 시도
+try:
+    from _version import __version__, __app_name__, __description__, __author__, __copyright__
+    # 버전 정보 헤더 업데이트
+    program_header = f"""
+{__app_name__}
+A tool for SPT Tarkov asset management
+
+Author: {__author__}
+{__copyright__}
+Version: {__version__}
+License: MIT
+Description: {__description__}
+"""
+    print(program_header)
+except ImportError:
+    print("Version information could not be loaded. This might be a development build.")
 
 # 시작 시간 측정
 start_time = time.time()

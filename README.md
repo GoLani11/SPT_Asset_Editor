@@ -1,6 +1,6 @@
 # 타르코프 에셋 에디터
 
-SPT 타르코프(Escape From Tarkov) 게임의 `.assets, .bundle` 파일에서 텍스처(Texture2D) 이미지를 추출, 미리보기, 수정 및 복원할 수 있는 도구입니다.
+SPT 타르코프(Escape From Tarkov) 게임의 `.assets`, `.bundle` 파일에서 텍스처(Texture2D) 이미지를 추출, 미리보기, 수정 및 복원할 수 있는 도구입니다.
 
 ## 기능
 

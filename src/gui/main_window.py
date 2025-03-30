@@ -19,6 +19,16 @@ from core.texture_processor import TextureProcessor
 from core.backup_manager import BackupManager
 from utils.resource_helper import get_resource_path
 
+try:
+    from _version import __version__, __author__, __copyright__, __app_name__, __description__
+except ImportError:
+    # 빌드 전에 _version.py가 존재하지 않을 경우 기본값 설정
+    __version__ = "개발 버전"
+    __author__ = "Golani11"
+    __copyright__ = "© 2025 Golani11. All rights reserved."
+    __app_name__ = "SPT Asset Editor"
+    __description__ = "SPT 타르코프 게임의 에셋 파일에서 Texture2D 이미지를 추출, 미리보기, 수정 및 복원하는 도구"
+
 # 에셋 파일 비동기 로딩을 위한 작업 스레드
 class AssetLoaderThread(QThread):
     load_finished = pyqtSignal(bool, str)  # 로딩 완료 시그널 (성공 여부, 파일 경로)
@@ -57,7 +67,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """UI 초기화"""
         # 윈도우 기본 설정
-        self.setWindowTitle("타르코프 에셋 에디터")
+        self.setWindowTitle("SPT 에셋 에디터")
         self.setGeometry(100, 100, 1280, 800)
         
         # 애플리케이션 아이콘 설정
@@ -338,7 +348,7 @@ class MainWindow(QMainWindow):
 
             # 창 제목 업데이트
             file_type = self.assets_manager.file_type.capitalize() if self.assets_manager.file_type else "Unknown"
-            self.setWindowTitle(f"타르코프 에셋 에디터 - {os.path.basename(file_path)} ({file_type})")
+            self.setWindowTitle(f"SPT 에셋 에디터 - {os.path.basename(file_path)} ({file_type})")
 
             # .assets 파일의 경우 .resS 파일 확인
             if self.assets_manager.file_type == 'assets':
@@ -604,7 +614,7 @@ class MainWindow(QMainWindow):
                 
                 # 창 제목 업데이트
                 file_type = self.assets_manager.file_type.capitalize() if self.assets_manager.file_type else "Unknown"
-                self.setWindowTitle(f"타르코프 에셋 에디터 - {os.path.basename(file_path)} ({file_type})")
+                self.setWindowTitle(f"SPT 에셋 에디터 - {os.path.basename(file_path)} ({file_type})")
                 
                 # 저장 완료 메시지
                 if self.assets_manager.file_type == 'assets':
@@ -665,13 +675,42 @@ class MainWindow(QMainWindow):
     
     def show_about(self):
         """프로그램 정보 표시"""
-        QMessageBox.about(
-            self,
-            "타르코프 에셋 에디터 정보",
-            "타르코프 에셋 에디터 v1.0\n\n"
-            "SPT 타르코프 게임의 .assets 파일에서 Texture2D 이미지를 추출, 미리보기, 수정 및 복원할 수 있는 도구입니다.\n\n"
-            "© 2025 Golani11"
-        )
+        try:
+            icon_path = get_resource_path("resources/icon.ico")
+            if os.path.exists(icon_path):
+                icon = QIcon(icon_path)
+                about_box = QMessageBox(self)
+                about_box.setIconPixmap(icon.pixmap(64, 64))  # 아이콘 크기 설정
+                about_box.setWindowTitle("SPT 에셋 에디터 정보")
+                about_box.setTextFormat(Qt.RichText)
+                about_box.setText(
+                    f"<h3>{__app_name__} v{__version__}</h3>"
+                    f"<p>{__description__}</p>"
+                    f"<p>이 프로그램은 타르코프 관련 에셋 파일(.assets, .bundle)을 "
+                    f"보기 쉽게 보여주고 내부의 텍스처를 수정할 수 있도록 도와줍니다.</p>"
+                    f"<p><b>제작자:</b> {__author__}</p>"
+                    f"<p>{__copyright__}</p>"
+                )
+                about_box.exec_()
+            else:
+                # 아이콘이 없을 경우 기본 메시지 박스 사용
+                QMessageBox.about(
+                    self,
+                    "SPT 에셋 에디터 정보",
+                    f"{__app_name__} v{__version__}\n\n"
+                    f"{__description__}\n\n"
+                    f"{__copyright__}"
+                )
+        except Exception as e:
+            # 오류 발생 시 기본 정보 표시
+            QMessageBox.about(
+                self,
+                "SPT 에셋 에디터 정보",
+                "SPT 에셋 에디터\n\n"
+                "SPT 타르코프 게임의 .assets 및 .bundle 파일에서 텍스처를 "
+                "추출, 미리보기, 수정 및 복원할 수 있는 도구입니다.\n\n"
+                "© 2025 Golani11"
+            )
     
     def show_asset_structure_info(self):
         """Unity 에셋 구조 정보 표시"""

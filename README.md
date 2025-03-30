@@ -91,3 +91,6 @@ SPT 타르코프(Escape From Tarkov) 게임의 `.assets`, `.bundle` 파일에서
 ## 참고 프로그램
 - AssetStudio (https://github.com/Perfare/AssetStudio)
 - UABEA (https://github.com/nesrak1/UABEA)
+
+## AI 지원
+이 프로젝트는 개발 과정에서 Cursor AI의 도움을 받아 작성되었습니다.

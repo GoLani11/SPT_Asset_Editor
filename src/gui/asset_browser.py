@@ -1,7 +1,8 @@
 import os
 import sys
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                           QListWidget, QListWidgetItem, QLineEdit)
+                           QListWidget, QListWidgetItem, QLineEdit, QPushButton, QFileDialog,
+                           QCheckBox)
 from PyQt5.QtGui import QPixmap, QImage, QIcon
 from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread
 
@@ -66,6 +67,7 @@ class AssetBrowser(QWidget):
         self.textures = {}
         self.filtered_textures = []
         self.thumb_loader_thread = None
+        self.current_selected_texture = None
         
         self.init_ui()
         
@@ -127,11 +129,56 @@ class AssetBrowser(QWidget):
         self.texture_list.itemClicked.connect(self.on_texture_selected)
         layout.addWidget(self.texture_list)
         
+        # 정보 및 버튼 영역
+        info_buttons_widget = QWidget()
+        info_buttons_layout = QVBoxLayout(info_buttons_widget)
+        info_buttons_layout.setContentsMargins(8, 0, 8, 8)
+        info_buttons_layout.setSpacing(5)
+        
         # 정보 표시 레이블
         self.info_label = QLabel("로드된 텍스처: 0개")
-        self.info_label.setStyleSheet("padding: 8px; color: #424242;")
+        self.info_label.setStyleSheet("color: #424242;")
         self.info_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.info_label)
+        info_buttons_layout.addWidget(self.info_label)
+        
+        # 알파값 제거 체크박스
+        self.remove_alpha_checkbox = QCheckBox("PNG 저장 시 투명도(알파값) 제거하기")
+        self.remove_alpha_checkbox.setChecked(False)  # 기본값으로 비활성화
+        self.remove_alpha_checkbox.setToolTip("PNG 파일 저장 시 투명도를 제거하고 불투명한 이미지로 저장합니다.\n이미지 편집 프로그램에서 더 보기 쉽게 작업할 수 있습니다.\n그러나 이 이미지로 수정 후 다시 적용하려고 할 때\n원본 이미지 투명도 패턴으로 교체하는 것을 추천합니다.")
+        self.remove_alpha_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #424242;
+                margin-top: 5px;
+            }
+        """)
+        info_buttons_layout.addWidget(self.remove_alpha_checkbox)
+        
+        # 저장 버튼
+        self.save_button = QPushButton("원본 텍스처 저장")
+        self.save_button.setEnabled(False)  # 초기에는 비활성화
+        self.save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4A6DD0;
+                color: white;
+                border-radius: 5px;
+                padding: 8px;
+                margin-top: 5px;
+            }
+            QPushButton:hover {
+                background-color: #3A5DC0;
+            }
+            QPushButton:pressed {
+                background-color: #2A4DB0;
+            }
+            QPushButton:disabled {
+                background-color: #A0A0A0;
+                color: #D0D0D0;
+            }
+        """)
+        self.save_button.clicked.connect(self.save_original_texture)
+        info_buttons_layout.addWidget(self.save_button)
+        
+        layout.addWidget(info_buttons_widget)
         
     def filter_textures(self, search_text):
         """검색어에 따라 텍스처 목록 필터링"""
@@ -224,4 +271,79 @@ class AssetBrowser(QWidget):
         texture_id = item.data(Qt.UserRole)
         if texture_id in self.textures:
             obj, data = self.textures[texture_id]
+            self.current_selected_texture = (obj, data)
+            self.save_button.setEnabled(True)  # 텍스처 선택 시 저장 버튼 활성화
             self.texture_selected.emit(obj, data)
+    
+    def save_original_texture(self):
+        """선택된 원본 텍스처를 저장하는 함수"""
+        if not self.current_selected_texture:
+            return
+        
+        obj, data = self.current_selected_texture
+        texture_name = getattr(data, 'm_Name', 'texture')
+        
+        # 파일 저장 대화상자
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "원본 텍스처 저장",
+            f"{texture_name}",
+            "PNG 이미지 (*.png);;TGA 이미지 (*.tga);;모든 파일 (*.*)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            # 이미지 가져오기
+            img = self.texture_processor.get_texture_preview(data)
+            original_mode = img.mode
+            
+            # 파일 확장자에 따라 저장 포맷 결정
+            _, file_extension = os.path.splitext(file_path)
+            file_extension = file_extension.lower()
+            
+            # 로그 및 메시지용 변수
+            alpha_removed = False
+            
+            # PNG 저장 시 알파값 제거 옵션 적용
+            if file_extension == '.png' or not file_extension:
+                # 확장자가 없으면 .png 추가
+                if not file_extension:
+                    file_path += '.png'
+                
+                # 알파값 제거 옵션이 체크되어 있고 이미지에 알파 채널이 있는 경우
+                if self.remove_alpha_checkbox.isChecked() and img.mode == 'RGBA':
+                    # RGB 모드로 변환하여 알파값 제거
+                    img = img.convert('RGB')
+                    alpha_removed = True
+                    print(f"이미지 모드 변환: {original_mode} -> RGB (알파값 제거)")
+                
+                img.save(file_path)
+            elif file_extension == '.tga':
+                # TGA 파일로 저장 (알파값 유지)
+                img.save(file_path, format='TGA')
+                print(f"이미지 저장: {file_path} (TGA 포맷, 알파채널 유지)")
+            else:
+                # 기타 확장자는 그대로 저장
+                img.save(file_path)
+                print(f"이미지 저장: {file_path} (원본 포맷 유지)")
+            
+            # 성공 메시지
+            from PyQt5.QtWidgets import QMessageBox
+            success_message = f"텍스처가 성공적으로 저장되었습니다:\n{file_path}"
+            
+            # 알파값 제거 정보 추가
+            if alpha_removed:
+                success_message += f"\n\n원본 이미지 형식: {original_mode}\n투명도(알파값)가 제거되었습니다."
+            
+            QMessageBox.information(
+                self, "저장 성공",
+                success_message
+            )
+        except Exception as e:
+            # 오류 메시지
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(
+                self, "저장 오류",
+                f"텍스처 저장 중 오류가 발생했습니다:\n{str(e)}"
+            )

@@ -56,7 +56,9 @@ class MainWindow(QMainWindow):
         self.texture_processor = TextureProcessor()
         self.backup_manager = BackupManager()
         
-        self.backup_manager.ensure_backup_directory()
+        # 백업 디렉토리 초기화 제거 (저장 시마다 새로 설정하도록 함)
+        # self.backup_manager.ensure_backup_directory()
+        
         self.init_ui()
         
         self.current_file_path = None
@@ -237,70 +239,6 @@ class MainWindow(QMainWindow):
                     )
                     return
             
-            # 백업 경로 설정 (항상 선택하도록 함)
-            # 파일명과 관련된 기본 백업 폴더명 생성
-            file_name = os.path.basename(file_path)
-            file_base, file_ext = os.path.splitext(file_name)
-            suggested_backup_dir = os.path.join(
-                self.backup_manager.get_backup_directory(),
-                f"{file_base}_backups"
-            )
-            
-            # 백업 경로 선택 대화상자 표시
-            QMessageBox.information(
-                self,
-                "백업 경로 설정",
-                "이 에셋 파일의 백업을 저장할 폴더를 선택해주세요.\n"
-                "백업은 필수이며, 지정된 폴더에 타임스탬프가 포함된 백업 파일이 생성됩니다.",
-                QMessageBox.Ok
-            )
-            
-            backup_dir = QFileDialog.getExistingDirectory(
-                self, "백업 폴더 선택", suggested_backup_dir,
-                QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
-            )
-            
-            # 사용자가 백업 폴더 선택을 취소한 경우
-            if not backup_dir:
-                self.statusBar().showMessage("파일 로딩 취소됨 - 백업 폴더가 선택되지 않았습니다.")
-                return
-            
-            # 선택한 백업 경로 설정
-            if not self.backup_manager.set_backup_directory(backup_dir):
-                QMessageBox.critical(
-                    self,
-                    "백업 폴더 오류",
-                    f"선택한 백업 폴더를 사용할 수 없습니다: {backup_dir}\n"
-                    "폴더가 존재하는지, 쓰기 권한이 있는지 확인하세요.",
-                    QMessageBox.Ok
-                )
-                return
-            
-            # 자동 백업 수행
-            print(f"[DEBUG] 자동 백업 호출 시작: {file_path}")
-            backup_result = self.backup_manager.create_automatic_backup(file_path)
-            if backup_result:
-                print(f"[DEBUG] 자동 백업 생성 성공: {backup_result}")
-                # 성공 메시지 표시
-                QMessageBox.information(
-                    self,
-                    "백업 완료",
-                    f"자동 백업이 성공적으로 생성되었습니다:\n{backup_result}",
-                    QMessageBox.Ok
-                )
-            else:
-                error_msg = f"에셋 파일 '{file_name}'의 백업을 생성하지 못했습니다."
-                print(f"[DEBUG] 자동 백업 생성 실패: {error_msg}")
-                if QMessageBox.critical(
-                    self,
-                    "백업 실패",
-                    f"{error_msg}\n파일 로드를 계속하시겠습니까?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                ) == QMessageBox.No:
-                    self.statusBar().showMessage("파일 로딩 취소됨 - 백업 실패")
-                    return
-                
             # 파일 로딩 시작
             self.start_loading(file_path)
     
@@ -436,37 +374,98 @@ class MainWindow(QMainWindow):
         if not self.current_file_path:
             QMessageBox.warning(self, "경고", "저장할 파일이 로드되지 않았습니다.")
             return
-
-        # 백업 생성
-        file_name = os.path.basename(self.current_file_path)
-        file_base, file_ext = os.path.splitext(file_name)
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        default_backup_name = f"{file_base}_save_{timestamp}{file_ext}"
-
-        # 이미 설정된 백업 디렉토리 사용
-        backup_dir_path = self.backup_manager.get_backup_directory()
-        if not backup_dir_path:
-            QMessageBox.critical(
+        
+        # 백업 여부 플래그
+        backup_requested = False
+        temp_backup_dir = None
+        
+        # 저장 전 백업 안내
+        reply = QMessageBox.question(
+            self, 
+            "저장 전 백업",
+            "파일을 저장하기 전에 현재 상태를 백업하시겠습니까?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        if reply == QMessageBox.Yes:
+            backup_requested = True
+            # 파일명과 관련된 기본 백업 폴더명 생성
+            file_name = os.path.basename(self.current_file_path)
+            file_base, file_ext = os.path.splitext(file_name)
+            suggested_backup_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                "backups",
+                f"{file_base}_backups"
+            )
+            
+            # 백업 경로 선택 대화상자 표시
+            QMessageBox.information(
                 self,
-                "백업 폴더 오류",
-                "백업 폴더가 설정되지 않았습니다. 파일을 다시 열어 백업 폴더를 설정해주세요.",
+                "백업 경로 설정",
+                "이 에셋 파일의 백업을 저장할 폴더를 선택해주세요.\n"
+                "지정된 폴더에 타임스탬프가 포함된 백업 파일이 생성됩니다.",
                 QMessageBox.Ok
             )
-            self.statusBar().showMessage("백업 폴더가 설정되지 않아 저장 작업을 중단합니다.")
-            return
-
-        # 백업 파일 경로 설정 및 백업 생성
-        backup_path = os.path.join(backup_dir_path, default_backup_name)
-        created_backup_path = self.backup_manager.create_backup(self.current_file_path, backup_path=backup_path)
-
-        if not created_backup_path:
-            QMessageBox.critical(self, "백업 실패", f"필수 백업 파일을 생성할 수 없습니다: {backup_path}\n저장 작업을 중단합니다.")
-            self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
-            return
+            
+            backup_dir = QFileDialog.getExistingDirectory(
+                self, "백업 폴더 선택", suggested_backup_dir,
+                QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            )
+            
+            # 사용자가 백업 폴더 선택을 취소한 경우
+            if not backup_dir:
+                backup_requested = False
+                QMessageBox.warning(
+                    self, 
+                    "백업 취소",
+                    "백업 폴더가 선택되지 않았습니다. 백업 없이 저장하시겠습니까?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    self.statusBar().showMessage("저장 작업 취소됨")
+                    return
+            else:
+                # 선택한 백업 경로 설정
+                if not self.backup_manager.set_backup_directory(backup_dir):
+                    QMessageBox.critical(
+                        self,
+                        "백업 폴더 오류",
+                        f"선택한 백업 폴더를 사용할 수 없습니다: {backup_dir}\n"
+                        "폴더가 존재하는지, 쓰기 권한이 있는지 확인하세요.",
+                        QMessageBox.Ok
+                    )
+                    self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
+                    return
+                
+                # 백업 생성
+                backup_result = self.backup_manager.create_backup(self.current_file_path)
+                if not backup_result:
+                    error_msg = f"에셋 파일 '{os.path.basename(self.current_file_path)}'의 백업을 생성하지 못했습니다."
+                    reply = QMessageBox.critical(
+                        self,
+                        "백업 실패",
+                        f"{error_msg}\n백업 없이 파일 저장을 계속하시겠습니까?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if reply == QMessageBox.No:
+                        self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
+                        return
+                    backup_requested = False
 
         # 파일 저장 로직
         save_successful = False
         saved_to_path = None
+        
+        # 임시 디렉토리 생성 (백업 원하지 않을 경우)
+        if not backup_requested:
+            # 임시 백업 디렉토리 생성
+            temp_backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "temp_backup")
+            os.makedirs(temp_backup_dir, exist_ok=True)
+            self.backup_manager.set_backup_directory(temp_backup_dir)
+            print(f"임시 백업 디렉토리 생성: {temp_backup_dir}")
         
         # 백업 폴더에 임시 저장 후 원본 위치로 복사
         if self.backup_manager.ensure_backup_directory():
@@ -538,6 +537,29 @@ class MainWindow(QMainWindow):
             if self.texture_modified_since_load:
                 self.image_editor.restore_button.setEnabled(True)
             self.texture_modified_since_load = False
+            
+            # 백업을 원하지 않았던 경우 임시 디렉토리 삭제
+            if not backup_requested and temp_backup_dir and os.path.exists(temp_backup_dir):
+                try:
+                    # 디렉토리 내 모든 파일 삭제
+                    for filename in os.listdir(temp_backup_dir):
+                        file_path = os.path.join(temp_backup_dir, filename)
+                        try:
+                            if os.path.isfile(file_path):
+                                os.remove(file_path)
+                        except Exception as e:
+                            print(f"임시 파일 삭제 오류: {str(e)} - {file_path}")
+                    
+                    # 디렉토리 삭제
+                    os.rmdir(temp_backup_dir)
+                    print(f"임시 백업 디렉토리 삭제 완료: {temp_backup_dir}")
+                    
+                    # 백업 디렉토리 초기화
+                    self.backup_manager.backup_dir = None
+                except Exception as e:
+                    print(f"임시 백업 디렉토리 삭제 오류: {str(e)} - {temp_backup_dir}")
+                    # 오류가 나도 백업 디렉토리는 초기화
+                    self.backup_manager.backup_dir = None
     
     def save_file_as(self):
         """다른 이름으로 파일 저장"""
@@ -560,8 +582,95 @@ class MainWindow(QMainWindow):
         )
         
         if file_path:
-            # 백업 디렉토리 확인
-            self.backup_manager.ensure_backup_directory()
+            # 백업 여부 플래그
+            backup_requested = False
+            temp_backup_dir = None
+            
+            # 저장 전 백업 안내
+            reply = QMessageBox.question(
+                self, 
+                "저장 전 백업",
+                "파일을 저장하기 전에 현재 상태를 백업하시겠습니까?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.Yes:
+                backup_requested = True
+                # 파일명과 관련된 기본 백업 폴더명 생성
+                file_name = os.path.basename(self.current_file_path or file_path)
+                file_base, file_ext = os.path.splitext(file_name)
+                suggested_backup_dir = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                    "backups",
+                    f"{file_base}_backups"
+                )
+                
+                # 백업 경로 선택 대화상자 표시
+                QMessageBox.information(
+                    self,
+                    "백업 경로 설정",
+                    "이 에셋 파일의 백업을 저장할 폴더를 선택해주세요.\n"
+                    "지정된 폴더에 타임스탬프가 포함된 백업 파일이 생성됩니다.",
+                    QMessageBox.Ok
+                )
+                
+                backup_dir = QFileDialog.getExistingDirectory(
+                    self, "백업 폴더 선택", suggested_backup_dir,
+                    QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+                )
+                
+                # 사용자가 백업 폴더 선택을 취소한 경우
+                if not backup_dir:
+                    backup_requested = False
+                    # 백업 없이 계속 진행할지 확인
+                    choice = QMessageBox.warning(
+                        self, 
+                        "백업 취소",
+                        "백업 폴더가 선택되지 않았습니다. 백업 없이 저장하시겠습니까?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if choice == QMessageBox.No:
+                        self.statusBar().showMessage("저장 작업 취소됨")
+                        return
+                else:
+                    # 선택한 백업 경로 설정
+                    if not self.backup_manager.set_backup_directory(backup_dir):
+                        QMessageBox.critical(
+                            self,
+                            "백업 폴더 오류",
+                            f"선택한 백업 폴더를 사용할 수 없습니다: {backup_dir}\n"
+                            "폴더가 존재하는지, 쓰기 권한이 있는지 확인하세요.",
+                            QMessageBox.Ok
+                        )
+                        self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
+                        return
+                    
+                    # 현재 파일이 있는 경우에만 백업 생성
+                    if self.current_file_path:
+                        backup_result = self.backup_manager.create_backup(self.current_file_path)
+                        if not backup_result:
+                            error_msg = f"에셋 파일 '{os.path.basename(self.current_file_path)}'의 백업을 생성하지 못했습니다."
+                            choice = QMessageBox.critical(
+                                self,
+                                "백업 실패",
+                                f"{error_msg}\n백업 없이 파일 저장을 계속하시겠습니까?",
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.No
+                            )
+                            if choice == QMessageBox.No:
+                                self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
+                                return
+                            backup_requested = False
+            
+            # 임시 디렉토리 생성 (백업 원하지 않을 경우)
+            if not backup_requested:
+                # 임시 백업 디렉토리 생성
+                temp_backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "temp_backup")
+                os.makedirs(temp_backup_dir, exist_ok=True)
+                self.backup_manager.set_backup_directory(temp_backup_dir)
+                print(f"임시 백업 디렉토리 생성: {temp_backup_dir}")
             
             # 백업에서 복원 여부 확인
             latest_backup = None
@@ -642,6 +751,29 @@ class MainWindow(QMainWindow):
                 if self.texture_modified_since_load:
                     self.image_editor.restore_button.setEnabled(True)
                 self.texture_modified_since_load = False
+                
+                # 백업을 원하지 않았던 경우 임시 디렉토리 삭제
+                if not backup_requested and temp_backup_dir and os.path.exists(temp_backup_dir):
+                    try:
+                        # 디렉토리 내 모든 파일 삭제
+                        for filename in os.listdir(temp_backup_dir):
+                            file_path = os.path.join(temp_backup_dir, filename)
+                            try:
+                                if os.path.isfile(file_path):
+                                    os.remove(file_path)
+                            except Exception as e:
+                                print(f"임시 파일 삭제 오류: {str(e)} - {file_path}")
+                        
+                        # 디렉토리 삭제
+                        os.rmdir(temp_backup_dir)
+                        print(f"임시 백업 디렉토리 삭제 완료: {temp_backup_dir}")
+                        
+                        # 백업 디렉토리 초기화
+                        self.backup_manager.backup_dir = None
+                    except Exception as e:
+                        print(f"임시 백업 디렉토리 삭제 오류: {str(e)} - {temp_backup_dir}")
+                        # 오류가 나도 백업 디렉토리는 초기화
+                        self.backup_manager.backup_dir = None
             else:
                 QMessageBox.critical(self, "오류", f"파일을 저장할 수 없습니다: {file_path}")
     

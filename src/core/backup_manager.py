@@ -13,9 +13,8 @@ class BackupManager:
     """
     
     def __init__(self):
-        # 기본 백업 폴더 설정
-        self.backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "backups")
-        os.makedirs(self.backup_dir, exist_ok=True)
+        # 기본 백업 폴더 설정 - 매번 새로 설정되도록 None으로 초기화
+        self.backup_dir = None  # 변경: 초기에는 백업 디렉토리를 설정하지 않음
         self.backup_history = {}  # 파일 경로: [백업 경로 목록]
     
     def set_backup_directory(self, directory_path: str) -> bool:
@@ -55,17 +54,25 @@ class BackupManager:
     def get_backup_directory(self) -> str:
         """
         현재 설정된 백업 디렉토리를 반환합니다.
-        디렉토리가 유효하지 않으면 기본 디렉토리를 생성하고 반환합니다.
+        디렉토리가 설정되지 않았거나 유효하지 않으면 임시 기본 디렉토리를 생성하고 반환합니다.
         
         Returns:
             str: 백업 디렉토리 경로
         """
+        # 백업 디렉토리가 설정되지 않은 경우 기본 디렉토리 반환 (설정은 하지 않음)
+        if self.backup_dir is None:
+            temp_backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "backups")
+            os.makedirs(temp_backup_dir, exist_ok=True)
+            print(f"임시 백업 디렉토리 생성: {temp_backup_dir}")
+            return temp_backup_dir
+            
         # 백업 디렉토리가 존재하고 쓰기 가능한지 확인
         if not os.path.exists(self.backup_dir) or not os.path.isdir(self.backup_dir) or not os.access(self.backup_dir, os.W_OK):
-            # 기본 디렉토리로 재설정
-            self.backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "backups")
-            os.makedirs(self.backup_dir, exist_ok=True)
-            print(f"백업 디렉토리가 유효하지 않아 기본 디렉토리로 재설정: {self.backup_dir}")
+            # 임시 기본 디렉토리 반환 (설정은 하지 않음)
+            temp_backup_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "backups")
+            os.makedirs(temp_backup_dir, exist_ok=True)
+            print(f"백업 디렉토리가 유효하지 않아 임시 디렉토리 사용: {temp_backup_dir}")
+            return temp_backup_dir
             
         return self.backup_dir
     

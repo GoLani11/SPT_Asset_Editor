@@ -6,7 +6,7 @@ A tool for SPT Tarkov asset management
 
 Author: Golani11
 Copyright: © 2025 Golani11
-Version: 1.0.0
+Version: 1.0.3
 License: MIT
 Description: SPT Asset Editor is a tool for viewing and editing textures in SPT Tarkov game files.
 """

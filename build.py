@@ -19,7 +19,8 @@ VERSION_INFO_FILE = "version_info.txt" # 버전 정보 파일 이름
 # src/config/settings.json 파일과 resources 폴더 전체를 포함합니다.
 DATA_FILES = [
     (os.path.join("src", "config", "settings.json"), "config"),
-    ("resources", "resources") # resources 폴더 전체를 실행 파일 옆 resources 폴더로 복사
+    ("resources", "resources"), # resources 폴더 전체를 실행 파일 옆 resources 폴더로 복사
+    (os.path.join("src", "locale"), "locale") # locale 폴더 추가
 ]
 
 # --- 버전 정보 파일 업데이트 함수 ---

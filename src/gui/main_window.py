@@ -179,9 +179,8 @@ class MainWindow(QMainWindow):
         self.set_backup_dir_action.triggered.connect(self.select_backup_directory)
         self.settings_menu.addAction(self.set_backup_dir_action)
         
-        # 언어 변경 메뉴
-        self.language_menu = QMenu(_("menu.settings.language"), self)
-        self.settings_menu.addMenu(self.language_menu)
+        # 언어 변경 메뉴 - 메인 메뉴바에 직접 추가
+        self.language_menu = menubar.addMenu(_("menu.settings.language"))
         
         self.lang_action_group = QActionGroup(self)
         self.lang_action_group.setExclusive(True)

@@ -4,7 +4,7 @@ import json
 import time
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QFileDialog, QMessageBox,
                              QAction, QVBoxLayout, QWidget, QSplitter, QProgressDialog,
-                             QHBoxLayout, QToolBar)
+                             QHBoxLayout, QToolBar, QActionGroup, QMenu)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize
 from PyQt5.QtGui import QIcon, QPixmap
 
@@ -18,6 +18,8 @@ from core.assets_manager import AssetsManager
 from core.texture_processor import TextureProcessor
 from core.backup_manager import BackupManager
 from utils.resource_helper import get_resource_path
+from utils.localization import get_string as _
+from utils import localization
 
 try:
     from _version import __version__, __author__, __copyright__, __app_name__, __description__
@@ -48,6 +50,8 @@ class AssetLoaderThread(QThread):
 class MainWindow(QMainWindow):
     """타르코프 에셋 에디터의 메인 윈도우 클래스"""
     
+    language_changed = pyqtSignal() # 언어 변경 시그널
+    
     def __init__(self):
         super().__init__()
         
@@ -59,17 +63,22 @@ class MainWindow(QMainWindow):
         # 백업 디렉토리 초기화 제거 (저장 시마다 새로 설정하도록 함)
         # self.backup_manager.ensure_backup_directory()
         
-        self.init_ui()
+        self.init_ui() # UI 요소 생성 먼저
         
         self.current_file_path = None
         self.load_thread = None
         self.progress_dialog = None
         self.texture_modified_since_load = False
         
+        # 언어 변경 시 UI 업데이트 연결
+        self.language_changed.connect(self.update_ui_texts)
+        # 초기 UI 텍스트 설정
+        self.update_ui_texts()
+        
     def init_ui(self):
         """UI 초기화"""
         # 윈도우 기본 설정
-        self.setWindowTitle("SPT 에셋 에디터")
+        self.setWindowTitle(_("main_window.title"))
         self.setGeometry(100, 100, 1280, 800)
         
         # 애플리케이션 아이콘 설정
@@ -126,70 +135,141 @@ class MainWindow(QMainWindow):
         # 시그널 연결 및 UI 요소 설정
         self.asset_browser.texture_selected.connect(self.on_texture_selected)
         self.setup_menu()
-        self.statusBar().showMessage("준비")
+        self.statusBar().showMessage(_("main_window.status_ready"))
         
     def setup_menu(self):
         """메뉴바 구성"""
         menubar = self.menuBar()
         
         # 파일 메뉴
-        file_menu = menubar.addMenu("파일")
+        self.file_menu = menubar.addMenu(_("menu.file"))
         
         # 열기
-        self.open_action = QAction(QIcon.fromTheme("document-open"), "열기", self)
+        self.open_action = QAction(QIcon.fromTheme("document-open"), _("menu.file.open"), self)
         self.open_action.setShortcut("Ctrl+O")
         self.open_action.triggered.connect(self.open_assets_file)
-        file_menu.addAction(self.open_action)
+        self.file_menu.addAction(self.open_action)
         
-        file_menu.addSeparator()
+        self.file_menu.addSeparator()
         
         # 저장 관련 액션
-        self.save_action = QAction(QIcon.fromTheme("document-save"), "저장", self)
+        self.save_action = QAction(QIcon.fromTheme("document-save"), _("menu.file.save"), self)
         self.save_action.setShortcut("Ctrl+S")
         self.save_action.triggered.connect(self.save_current_file)
-        file_menu.addAction(self.save_action)
+        self.file_menu.addAction(self.save_action)
         
-        self.save_as_action = QAction(QIcon.fromTheme("document-save-as"), "다른 이름으로 저장", self)
+        self.save_as_action = QAction(QIcon.fromTheme("document-save-as"), _("menu.file.save_as"), self)
         self.save_as_action.setShortcut("Ctrl+Shift+S")
         self.save_as_action.triggered.connect(self.save_file_as)
-        file_menu.addAction(self.save_as_action)
+        self.file_menu.addAction(self.save_as_action)
         
-        file_menu.addSeparator()
-        
-        # 설정 메뉴
-        settings_menu = menubar.addMenu("설정")
-        
-        # 백업 설정
-        set_backup_dir_action = QAction("백업 폴더 설정", self)
-        set_backup_dir_action.triggered.connect(self.select_backup_directory)
-        settings_menu.addAction(set_backup_dir_action)
-        
-        file_menu.addSeparator()
+        self.file_menu.addSeparator()
         
         # 종료
-        self.exit_action = QAction(QIcon.fromTheme("application-exit"), "종료", self)
+        self.exit_action = QAction(QIcon.fromTheme("application-exit"), _("menu.file.exit"), self)
         self.exit_action.setShortcut("Alt+F4")
         self.exit_action.triggered.connect(self.close)
-        file_menu.addAction(self.exit_action)
+        self.file_menu.addAction(self.exit_action)
         
+        # 설정 메뉴
+        self.settings_menu = menubar.addMenu(_("menu.settings"))
+        
+        # 백업 설정
+        self.set_backup_dir_action = QAction(_("menu.settings.set_backup_dir"), self)
+        self.set_backup_dir_action.triggered.connect(self.select_backup_directory)
+        self.settings_menu.addAction(self.set_backup_dir_action)
+        
+        # 언어 변경 메뉴
+        self.language_menu = QMenu(_("menu.settings.language"), self)
+        self.settings_menu.addMenu(self.language_menu)
+        
+        self.lang_action_group = QActionGroup(self)
+        self.lang_action_group.setExclusive(True)
+        
+        # 사용 가능한 언어 액션 추가
+        for lang_code in localization.SUPPORTED_LANGUAGES:
+            # 초기 텍스트는 언어 코드로 설정
+            action = QAction(lang_code.upper(), self, checkable=True) # 예: KO, EN
+            action.setData(lang_code)
+            action.setChecked(localization.get_current_language() == lang_code)
+            action.triggered.connect(self.change_language)
+            self.language_menu.addAction(action)
+            self.lang_action_group.addAction(action)
+            
         # 도구 메뉴
-        tools_menu = menubar.addMenu("도구")
+        self.tools_menu = menubar.addMenu(_("menu.tools"))
         
-        asset_info_action = QAction("에셋 구조 정보", self)
-        asset_info_action.triggered.connect(self.show_asset_structure_info)
-        tools_menu.addAction(asset_info_action)
+        self.asset_info_action = QAction(_("menu.tools.asset_info"), self)
+        self.asset_info_action.triggered.connect(self.show_asset_structure_info)
+        self.tools_menu.addAction(self.asset_info_action)
+        
+        self.cleanup_temp_action = QAction(_("menu.tools.cleanup_temp"), self)
+        self.cleanup_temp_action.triggered.connect(self.cleanup_temp_files)
+        self.tools_menu.addAction(self.cleanup_temp_action)
         
         # 도움말 메뉴
-        help_menu = menubar.addMenu("도움말")
+        self.help_menu = menubar.addMenu(_("menu.help"))
         
-        about_action = QAction("정보", self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
+        self.about_action = QAction(_("menu.help.about"), self)
+        self.about_action.triggered.connect(self.show_about)
+        self.help_menu.addAction(self.about_action)
         
+    def change_language(self):
+        """언어 변경 액션 처리"""
+        action = self.sender()
+        if action:
+            new_lang_code = action.data()
+            if new_lang_code != localization.get_current_language():
+                localization.set_language(new_lang_code)
+                self.language_changed.emit() # 시그널 발생
+                
+                # 사용자에게 재시작 안내 (필요에 따라)
+                QMessageBox.information(
+                    self, 
+                    _("main_window.language_changed_title"), 
+                    _("main_window.language_changed_message")
+                )
+
+    def update_ui_texts(self):
+        """UI의 모든 텍스트를 현재 언어로 업데이트"""
+        self.setWindowTitle(_("main_window.title"))
+        self.statusBar().showMessage(_("main_window.status_ready"))
+
+        # 메뉴 업데이트
+        self.file_menu.setTitle(_("menu.file"))
+        self.open_action.setText(_("menu.file.open"))
+        self.save_action.setText(_("menu.file.save"))
+        self.save_as_action.setText(_("menu.file.save_as"))
+        self.exit_action.setText(_("menu.file.exit"))
+        self.settings_menu.setTitle(_("menu.settings"))
+        self.set_backup_dir_action.setText(_("menu.settings.set_backup_dir"))
+        self.language_menu.setTitle(_("menu.settings.language"))
+        self.tools_menu.setTitle(_("menu.tools"))
+        self.asset_info_action.setText(_("menu.tools.asset_info"))
+        self.cleanup_temp_action.setText(_("menu.tools.cleanup_temp"))
+        self.help_menu.setTitle(_("menu.help"))
+        self.about_action.setText(_("menu.help.about"))
+        
+        # 언어 메뉴 액션 텍스트 업데이트 (번역된 이름 사용)
+        for action in self.lang_action_group.actions():
+            lang_code = action.data()
+            # lang_code ('ko', 'en')를 실제 번역 키 ('korean', 'english')로 매핑
+            lang_name_map = {"ko": "korean", "en": "english"}
+            translation_key = f"menu.settings.language.{lang_name_map.get(lang_code, lang_code)}"
+            action.setText(_(translation_key))
+            action.setChecked(localization.get_current_language() == lang_code)
+
+        # 하위 위젯 업데이트 (시그널 또는 직접 호출)
+        self.asset_browser.update_ui_texts() # 하위 위젯 업데이트 메서드 호출
+        self.image_preview.update_ui_texts()
+        self.image_editor.update_ui_texts()
+
+        # 기타 UI 요소 업데이트 (필요시 추가)
+
     def select_backup_directory(self):
         """백업 디렉토리 선택 대화상자"""
         directory = QFileDialog.getExistingDirectory(
-            self, "백업 폴더 선택", self.backup_manager.get_backup_directory(),
+            self, _("dialog.backup_path_select.title"), self.backup_manager.get_backup_directory(),
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
         )
         
@@ -198,21 +278,20 @@ class MainWindow(QMainWindow):
             
             if success:
                 QMessageBox.information(
-                    self, "백업 폴더 설정", 
-                    f"백업 폴더가 성공적으로 설정되었습니다:\n{directory}\n\n"
-                    f"앞으로 모든 백업 파일은 이 폴더에 저장됩니다."
+                    self, _("main_window.backup_folder_set_success_title"), 
+                    _("main_window.backup_folder_set_success_message", directory=directory) + 
+                    "\n\n" + _("main_window.backup_folder_set_info")
                 )
             else:
                 QMessageBox.critical(
-                    self, "오류", 
-                    f"백업 폴더를 설정할 수 없습니다:\n{directory}\n\n"
-                    f"폴더가 존재하는지, 쓰기 권한이 있는지 확인하세요."
+                    self, _("error.backup_dir_set.title"), 
+                    _("error.backup_dir_set.message", directory=directory)
                 )
     
     def open_assets_file(self):
         """에셋 파일 열기 및 비동기 로딩 시작"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "에셋 파일 열기", "", "Unity 에셋 파일 (*.assets *.bundle);;Assets 파일 (*.assets);;Bundle 파일 (*.bundle);;모든 파일 (*.*)"
+            self, localization.get_string("menu.file.open"), "", localization.get_string("main_window.open_file_filter")
         )
         
         if file_path:
@@ -228,13 +307,8 @@ class MainWindow(QMainWindow):
                 if os.path.exists(be_exe_path) and os.path.isdir(battle_eye_dir):
                     QMessageBox.critical(
                         self,
-                        "위험: 본섭 타르코프 에셋 파일 수정 시도",
-                        "주의! 당신은 본섭 타르코프의 에셋 파일을 수정하려고 합니다!\n\n"
-                        "이는 게임 클라이언트를 손상시킬 수 있으며 BattlEye 안티치트에 의해\n"
-                        "탐지되어 계정이 차단될 수 있습니다.\n\n"
-                        "본섭 타르코프 에셋 파일 수정은 권장하지 않습니다.\n"
-                        "만약 다른 방법으로 수정을 진행할 경우\n"
-                        "발생할 수 있는 문제에 대해 책임지지 않습니다.",
+                        localization.get_string("live_tarkov_warning.title"),
+                        localization.get_string("live_tarkov_warning.message"),
                         QMessageBox.Ok
                     )
                     return
@@ -245,14 +319,14 @@ class MainWindow(QMainWindow):
     def start_loading(self, file_path):
         """비동기 파일 로딩 시작"""
         if self.load_thread and self.load_thread.isRunning():
-            QMessageBox.warning(self, "로딩 중", "이미 다른 파일을 로딩 중입니다.")
+            QMessageBox.warning(self, localization.get_string("warning.loading_in_progress.title"), localization.get_string("warning.loading_in_progress.message"))
             return
 
-        self.statusBar().showMessage(f"파일 로딩 시작: {file_path}...")
+        self.statusBar().showMessage(localization.get_string("main_window.status_loading_start", file_path=file_path))
         
         # 진행률 대화상자 설정
-        self.progress_dialog = QProgressDialog("파일을 로딩 중입니다...", "취소", 0, 0, self)
-        self.progress_dialog.setWindowTitle("로딩 중")
+        self.progress_dialog = QProgressDialog(localization.get_string("dialog.loading.message"), localization.get_string("general.cancel"), 0, 0, self)
+        self.progress_dialog.setWindowTitle(localization.get_string("dialog.loading.title"))
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         self.progress_dialog.canceled.connect(self.cancel_loading)
         self.progress_dialog.show()
@@ -271,7 +345,7 @@ class MainWindow(QMainWindow):
             if self.load_thread.isRunning():
                 print("경고: 스레드를 정상적으로 종료하지 못했습니다.")
 
-        self.statusBar().showMessage("파일 로드 취소됨")
+        self.statusBar().showMessage(localization.get_string("main_window.status_loading_cancelled"))
         if self.progress_dialog:
             self.progress_dialog.close()
 
@@ -286,7 +360,7 @@ class MainWindow(QMainWindow):
 
             # 창 제목 업데이트
             file_type = self.assets_manager.file_type.capitalize() if self.assets_manager.file_type else "Unknown"
-            self.setWindowTitle(f"SPT 에셋 에디터 - {os.path.basename(file_path)} ({file_type})")
+            self.setWindowTitle(f"{localization.get_string('main_window.title')} - {os.path.basename(file_path)} ({file_type})")
 
             # .assets 파일의 경우 .resS 파일 확인
             if self.assets_manager.file_type == 'assets':
@@ -298,22 +372,16 @@ class MainWindow(QMainWindow):
 
                 # 누락된 텍스처 처리
                 if hasattr(self.assets_manager, 'missing_texture_ids') and self.assets_manager.missing_texture_ids:
-                    msg = f"일부 텍스처({len(self.assets_manager.missing_texture_ids)}개)를 로드할 수 없습니다.\\n\\n"
-
-                    if self.assets_manager.file_type == 'assets':
-                        msg += "이 문제는 관련된 .resS 파일이 없거나, 텍스처 데이터가 손상되었을 때 발생합니다.\\n"
-                    elif self.assets_manager.file_type == 'bundle':
-                        msg += "이 문제는 번들 파일의 텍스처 데이터가 손상되었거나 접근할 수 없을 때 발생합니다.\\n"
-
-                    msg += "텍스처 편집이 제한될 수 있습니다."
-
-                    QMessageBox.warning(self, "텍스처 로드 경고", msg)
+                    count = len(self.assets_manager.missing_texture_ids)
+                    reason_key = "warning.texture_load.reason_assets" if self.assets_manager.file_type == 'assets' else "warning.texture_load.reason_bundle"
+                    reason = localization.get_string(reason_key)
+                    msg = localization.get_string("warning.texture_load.message", count=count, reason=reason)
+                    QMessageBox.warning(self, localization.get_string("warning.texture_load.title"), msg)
             except Exception as e:
                 QMessageBox.critical(
                     self,
-                    "텍스처 로드 오류",
-                    f"텍스처 목록을 로드하는 중 오류가 발생했습니다:\\n{str(e)}\\n\\n"
-                    f"일부 기능이 제한될 수 있습니다."
+                    localization.get_string("error.texture_list_load.title"),
+                    localization.get_string("error.texture_list_load.message", error=str(e))
                 )
 
             # UI 상태 초기화
@@ -325,10 +393,10 @@ class MainWindow(QMainWindow):
             # 상태 메시지 업데이트
             file_ext = os.path.splitext(file_path)[1].lower()
             file_type_str = "Bundle" if file_ext == ".bundle" else "Assets"
-            self.statusBar().showMessage(f"{file_type_str} 파일 로드 완료: {file_path}")
+            self.statusBar().showMessage(localization.get_string("main_window.status_loading_complete", file_type=file_type_str, file_path=file_path))
         else:
-            QMessageBox.critical(self, "오류", f"파일을 로드할 수 없습니다: {file_path}")
-            self.statusBar().showMessage(f"파일 로드 실패: {file_path}")
+            QMessageBox.critical(self, localization.get_string("error.file_load.title"), localization.get_string("error.file_load.message", file_path=file_path))
+            self.statusBar().showMessage(localization.get_string("main_window.status_loading_failed", file_path=file_path))
             self.texture_modified_since_load = False
         
         self.load_thread = None
@@ -361,18 +429,14 @@ class MainWindow(QMainWindow):
         if not found_res_files:
             QMessageBox.warning(
                 self, 
-                "리소스 파일 누락 경고", 
-                "관련된 .resS 파일을 찾을 수 없습니다.\n\n"
-                "이로 인해 일부 텍스처가 올바르게 로드되지 않을 수 있으며,\n"
-                "텍스처가 저장된 후에도 변경사항이 게임에 적용되지 않을 수 있습니다.\n\n"
-                "에셋 파일이 있는 폴더에 관련 .resS 파일(예: sharedassets*.assets.resS)이 "
-                "함께 있는지 확인하세요."
+                localization.get_string("warning.resS_missing.title"), 
+                localization.get_string("warning.resS_missing.message")
             )
     
     def save_current_file(self):
         """현재 로드된 파일 저장"""
         if not self.current_file_path:
-            QMessageBox.warning(self, "경고", "저장할 파일이 로드되지 않았습니다.")
+            QMessageBox.warning(self, localization.get_string("warning.no_file_to_backup.title"), localization.get_string("warning.no_file_to_backup.message"))
             return
         
         # 백업 여부 플래그
@@ -382,8 +446,8 @@ class MainWindow(QMainWindow):
         # 저장 전 백업 안내
         reply = QMessageBox.question(
             self, 
-            "저장 전 백업",
-            "파일을 저장하기 전에 현재 상태를 백업하시겠습니까?",
+            localization.get_string("dialog.backup_before_save.title"),
+            localization.get_string("dialog.backup_before_save.message"),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
         )
@@ -402,56 +466,56 @@ class MainWindow(QMainWindow):
             # 백업 경로 선택 대화상자 표시
             QMessageBox.information(
                 self,
-                "백업 경로 설정",
-                "이 에셋 파일의 백업을 저장할 폴더를 선택해주세요.\n"
-                "지정된 폴더에 타임스탬프가 포함된 백업 파일이 생성됩니다.",
+                localization.get_string("dialog.backup_path_set.title"),
+                localization.get_string("dialog.backup_path_set.message"),
                 QMessageBox.Ok
             )
             
             backup_dir = QFileDialog.getExistingDirectory(
-                self, "백업 폴더 선택", suggested_backup_dir,
+                self, localization.get_string("dialog.backup_path_select.title"), suggested_backup_dir,
                 QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
             )
             
             # 사용자가 백업 폴더 선택을 취소한 경우
             if not backup_dir:
                 backup_requested = False
-                QMessageBox.warning(
+                # 수정: reply 변수 재사용 대신 새로운 변수 사용
+                cancel_reply = QMessageBox.warning(
                     self, 
-                    "백업 취소",
-                    "백업 폴더가 선택되지 않았습니다. 백업 없이 저장하시겠습니까?",
+                    localization.get_string("dialog.backup_cancelled.title"),
+                    localization.get_string("dialog.backup_cancelled.message"),
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No
                 )
-                if reply == QMessageBox.No:
-                    self.statusBar().showMessage("저장 작업 취소됨")
+                if cancel_reply == QMessageBox.No:
+                    self.statusBar().showMessage(localization.get_string("main_window.status_save_cancelled"))
                     return
             else:
                 # 선택한 백업 경로 설정
                 if not self.backup_manager.set_backup_directory(backup_dir):
                     QMessageBox.critical(
                         self,
-                        "백업 폴더 오류",
-                        f"선택한 백업 폴더를 사용할 수 없습니다: {backup_dir}\n"
-                        "폴더가 존재하는지, 쓰기 권한이 있는지 확인하세요.",
+                        localization.get_string("error.backup_folder_invalid.title"),
+                        localization.get_string("error.backup_folder_invalid.message", backup_dir=backup_dir),
                         QMessageBox.Ok
                     )
-                    self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
+                    self.statusBar().showMessage(localization.get_string("main_window.status_backup_failed"))
                     return
                 
                 # 백업 생성
                 backup_result = self.backup_manager.create_backup(self.current_file_path)
                 if not backup_result:
-                    error_msg = f"에셋 파일 '{os.path.basename(self.current_file_path)}'의 백업을 생성하지 못했습니다."
-                    reply = QMessageBox.critical(
+                    error_msg = localization.get_string("error.backup_creation.message", filename=os.path.basename(self.current_file_path))
+                    # 수정: reply 변수 재사용 대신 새로운 변수 사용
+                    continue_reply = QMessageBox.critical(
                         self,
-                        "백업 실패",
-                        f"{error_msg}\n백업 없이 파일 저장을 계속하시겠습니까?",
+                        localization.get_string("error.backup_creation.title"),
+                        localization.get_string("dialog.backup_failed_continue.message", error_msg=error_msg),
                         QMessageBox.Yes | QMessageBox.No,
                         QMessageBox.No
                     )
-                    if reply == QMessageBox.No:
-                        self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
+                    if continue_reply == QMessageBox.No:
+                        self.statusBar().showMessage(localization.get_string("main_window.status_backup_failed"))
                         return
                     backup_requested = False
 
@@ -499,41 +563,33 @@ class MainWindow(QMainWindow):
                         # 임시 .resS 파일 정리
                         deleted_files = self.backup_manager.cleanup_temp_resource_files()
                         
-                        message = (
-                            f"파일이 성공적으로 저장되었습니다.\n\n"
-                            f"변경된 .assets 파일이 원본 위치에 적용되었습니다.\n"
-                            f"기존 .resS 파일을 유지하여 텍스처 변경사항이 게임에 올바르게 적용됩니다."
-                        )
+                        message = localization.get_string("main_window.save_success_assets_message")
                         
                         if deleted_files > 0:
-                            message += f"\n\n임시 생성된 .resS 파일 {deleted_files}개가 백업 폴더에서 삭제되었습니다."
+                            message += localization.get_string("main_window.save_success_assets_cleaned_message", count=deleted_files)
                     else:
-                        message = (
-                            f"파일이 성공적으로 저장되었습니다.\n\n"
-                            f"변경된 {self.assets_manager.file_type} 파일이 원본 위치에 적용되었습니다."
-                        )
+                        message = localization.get_string("main_window.save_success_bundle_message", type=self.assets_manager.file_type)
                     
-                    QMessageBox.information(self, "저장 완료", message)
+                    QMessageBox.information(self, localization.get_string("asset_browser.save_success.title"), message)
                 except Exception as e:
                     QMessageBox.critical(
                         self, 
-                        "오류", 
-                        f"파일 복사 중 오류가 발생했습니다: {str(e)}\n\n"
-                        f"백업 폴더에 저장된 임시 파일: {temp_path}"
+                        localization.get_string("error.copy_file.title"), 
+                        localization.get_string("error.copy_file.message", error=str(e), temp_path=temp_path)
                     )
             else:
-                QMessageBox.critical(self, "오류", "임시 파일을 저장할 수 없습니다.")
+                QMessageBox.critical(self, localization.get_string("error.save_temp_file.title"), localization.get_string("error.save_temp_file.message"))
         else:
-            # 백업 폴더 없이 직접 저장
+            # 백업 폴더 없이 직접 저장 (이 경우는 거의 발생하지 않음, 임시 폴더가 생성되므로)
             if self.assets_manager.save_file():
                 save_successful = True
                 saved_to_path = self.current_file_path
             else:
-                 QMessageBox.critical(self, "오류", "파일을 저장할 수 없습니다.")
+                 QMessageBox.critical(self, localization.get_string("error.save_file.title"), localization.get_string("error.save_file.message"))
         
         # 저장 성공 후 처리
         if save_successful and saved_to_path:
-            self.statusBar().showMessage(f"파일 저장 완료: {saved_to_path}")
+            self.statusBar().showMessage(localization.get_string("main_window.status_saving_complete", file_path=saved_to_path))
             if self.texture_modified_since_load:
                 self.image_editor.restore_button.setEnabled(True)
             self.texture_modified_since_load = False
@@ -543,12 +599,12 @@ class MainWindow(QMainWindow):
                 try:
                     # 디렉토리 내 모든 파일 삭제
                     for filename in os.listdir(temp_backup_dir):
-                        file_path = os.path.join(temp_backup_dir, filename)
+                        file_path_to_delete = os.path.join(temp_backup_dir, filename)
                         try:
-                            if os.path.isfile(file_path):
-                                os.remove(file_path)
+                            if os.path.isfile(file_path_to_delete):
+                                os.remove(file_path_to_delete)
                         except Exception as e:
-                            print(f"임시 파일 삭제 오류: {str(e)} - {file_path}")
+                            print(f"임시 파일 삭제 오류: {str(e)} - {file_path_to_delete}")
                     
                     # 디렉토리 삭제
                     os.rmdir(temp_backup_dir)
@@ -569,16 +625,16 @@ class MainWindow(QMainWindow):
             initial_dir = os.path.dirname(self.current_file_path)
         
         # 파일 유형에 따른 필터 설정
-        file_filter = "모든 파일 (*.*)"
+        file_filter = localization.get_string("main_window.save_as_filter_all")
         if self.assets_manager.file_type == 'assets':
-            file_filter = "Unity Assets 파일 (*.assets);;모든 파일 (*.*)"
+            file_filter = localization.get_string("main_window.save_as_filter_assets")
         elif self.assets_manager.file_type == 'bundle':
-            file_filter = "Unity Bundle 파일 (*.bundle);;모든 파일 (*.*)"
+            file_filter = localization.get_string("main_window.save_as_filter_bundle")
         else:
-            file_filter = "Unity 파일 (*.assets *.bundle);;Unity Assets 파일 (*.assets);;Unity Bundle 파일 (*.bundle);;모든 파일 (*.*)"
+            file_filter = localization.get_string("main_window.save_as_filter_unity")
             
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "다른 이름으로 저장", initial_dir, file_filter
+            self, localization.get_string("menu.file.save_as"), initial_dir, file_filter
         )
         
         if file_path:
@@ -589,8 +645,8 @@ class MainWindow(QMainWindow):
             # 저장 전 백업 안내
             reply = QMessageBox.question(
                 self, 
-                "저장 전 백업",
-                "파일을 저장하기 전에 현재 상태를 백업하시겠습니까?",
+                localization.get_string("dialog.backup_before_save.title"),
+                localization.get_string("dialog.backup_before_save.message"),
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes
             )
@@ -609,14 +665,13 @@ class MainWindow(QMainWindow):
                 # 백업 경로 선택 대화상자 표시
                 QMessageBox.information(
                     self,
-                    "백업 경로 설정",
-                    "이 에셋 파일의 백업을 저장할 폴더를 선택해주세요.\n"
-                    "지정된 폴더에 타임스탬프가 포함된 백업 파일이 생성됩니다.",
+                    localization.get_string("dialog.backup_path_set.title"),
+                    localization.get_string("dialog.backup_path_set.message"),
                     QMessageBox.Ok
                 )
                 
                 backup_dir = QFileDialog.getExistingDirectory(
-                    self, "백업 폴더 선택", suggested_backup_dir,
+                    self, localization.get_string("dialog.backup_path_select.title"), suggested_backup_dir,
                     QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
                 )
                 
@@ -626,41 +681,40 @@ class MainWindow(QMainWindow):
                     # 백업 없이 계속 진행할지 확인
                     choice = QMessageBox.warning(
                         self, 
-                        "백업 취소",
-                        "백업 폴더가 선택되지 않았습니다. 백업 없이 저장하시겠습니까?",
+                        localization.get_string("dialog.backup_cancelled.title"),
+                        localization.get_string("dialog.backup_cancelled.message"),
                         QMessageBox.Yes | QMessageBox.No,
                         QMessageBox.No
                     )
                     if choice == QMessageBox.No:
-                        self.statusBar().showMessage("저장 작업 취소됨")
+                        self.statusBar().showMessage(localization.get_string("main_window.status_save_cancelled"))
                         return
                 else:
                     # 선택한 백업 경로 설정
                     if not self.backup_manager.set_backup_directory(backup_dir):
                         QMessageBox.critical(
                             self,
-                            "백업 폴더 오류",
-                            f"선택한 백업 폴더를 사용할 수 없습니다: {backup_dir}\n"
-                            "폴더가 존재하는지, 쓰기 권한이 있는지 확인하세요.",
+                            localization.get_string("error.backup_folder_invalid.title"),
+                            localization.get_string("error.backup_folder_invalid.message", backup_dir=backup_dir),
                             QMessageBox.Ok
                         )
-                        self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
+                        self.statusBar().showMessage(localization.get_string("main_window.status_backup_failed"))
                         return
                     
                     # 현재 파일이 있는 경우에만 백업 생성
                     if self.current_file_path:
                         backup_result = self.backup_manager.create_backup(self.current_file_path)
                         if not backup_result:
-                            error_msg = f"에셋 파일 '{os.path.basename(self.current_file_path)}'의 백업을 생성하지 못했습니다."
+                            error_msg = localization.get_string("error.backup_creation.message", filename=os.path.basename(self.current_file_path))
                             choice = QMessageBox.critical(
                                 self,
-                                "백업 실패",
-                                f"{error_msg}\n백업 없이 파일 저장을 계속하시겠습니까?",
+                                localization.get_string("error.backup_creation.title"),
+                                localization.get_string("dialog.backup_failed_continue.message", error_msg=error_msg),
                                 QMessageBox.Yes | QMessageBox.No,
                                 QMessageBox.No
                             )
                             if choice == QMessageBox.No:
-                                self.statusBar().showMessage("백업 실패로 저장 작업 중단됨")
+                                self.statusBar().showMessage(localization.get_string("main_window.status_backup_failed"))
                                 return
                             backup_requested = False
             
@@ -680,19 +734,17 @@ class MainWindow(QMainWindow):
             if latest_backup:
                 reply = QMessageBox.question(
                     self,
-                    "백업에서 복원",
-                    f"최신 백업({os.path.basename(latest_backup)})에서 복원한 후 저장하시겠습니까?\n\n"
-                    f"'예'를 선택하면 백업 파일에서 복원한 후 저장합니다.\n"
-                    f"'아니오'를 선택하면 현재 수정 중인 파일을 그대로 저장합니다.",
+                    localization.get_string("dialog.restore_from_backup.title"),
+                    localization.get_string("dialog.restore_from_backup.message", backup_name=os.path.basename(latest_backup)),
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No
                 )
                 
                 # 백업에서 복원
                 if reply == QMessageBox.Yes:
-                    self.statusBar().showMessage(f"백업에서 복원 중: {latest_backup}")
+                    self.statusBar().showMessage(localization.get_string("main_window.status_restore_backup_start", backup_path=latest_backup))
                     if not self.assets_manager.load_file(latest_backup):
-                        QMessageBox.critical(self, "오류", f"백업 파일을 로드할 수 없습니다: {latest_backup}")
+                        QMessageBox.critical(self, localization.get_string("error.backup_file_load.title"), localization.get_string("error.backup_file_load.message", backup_path=latest_backup))
                         return
             
             # .assets 파일 저장 시 .resS 파일 복사 옵션
@@ -703,18 +755,20 @@ class MainWindow(QMainWindow):
             
             should_copy_ress = False
             if self.assets_manager.file_type == 'assets' and src_dir and src_dir != dst_dir:
+                # 수정: QMessageBox.question의 버튼 텍스트도 번역
+                copy_button = localization.get_string("general.copy")
+                dont_copy_button = localization.get_string("general.dont_copy")
                 reply = QMessageBox.question(
                     self,
-                    ".resS 파일 복사 여부",
-                    "다른 폴더에 저장합니다. .resS 파일 처리 방식을 선택하세요:\n\n"
-                    "• '복사하기'를 선택하면 원본 폴더의 .resS 파일이 새 위치로 복사됩니다.\n"
-                    "• '복사하지 않음'을 선택하면 .assets 파일만 저장되고 .resS 파일은 복사되지 않습니다.",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes
+                    localization.get_string("dialog.ress_copy.title"),
+                    localization.get_string("dialog.ress_copy.message"),
+                    copy_button + "|" + dont_copy_button,
+                    copy_button
                 )
                 
-                should_copy_ress = (reply == QMessageBox.StandardButton.Yes)
-            
+                # 버튼 텍스트 기반으로 결과 확인
+                should_copy_ress = (reply == 0)
+                
             # 파일 저장
             save_successful = self.assets_manager.save_file(file_path, copy_resource_files=should_copy_ress)
             
@@ -723,30 +777,22 @@ class MainWindow(QMainWindow):
                 
                 # 창 제목 업데이트
                 file_type = self.assets_manager.file_type.capitalize() if self.assets_manager.file_type else "Unknown"
-                self.setWindowTitle(f"SPT 에셋 에디터 - {os.path.basename(file_path)} ({file_type})")
+                self.setWindowTitle(f"{localization.get_string('main_window.title')} - {os.path.basename(file_path)} ({file_type})")
                 
                 # 저장 완료 메시지
                 if self.assets_manager.file_type == 'assets':
                     if should_copy_ress:
-                        message = (
-                            f"파일이 성공적으로 저장되었습니다.\n\n"
-                            f"관련된 .resS 파일이 발견되면 함께 복사되었습니다.\n"
-                            f"이렇게 하면 텍스처 변경사항이 게임에 올바르게 적용됩니다."
-                        )
+                        message = localization.get_string("main_window.save_as_success_assets_copied_message")
                     else:
-                        message = (
-                            f"파일이 성공적으로 저장되었습니다.\n\n"
-                            f".assets 파일만 저장되었습니다.\n"
-                            f"텍스처 변경사항이 게임에 올바르게 적용되려면 관련 .resS 파일도 필요합니다."
-                        )
+                        message = localization.get_string("main_window.save_as_success_assets_not_copied_message")
                 else:
-                    message = f"파일이 성공적으로 저장되었습니다."
+                    message = localization.get_string("main_window.save_as_success_bundle_message")
                 
-                QMessageBox.information(self, "저장 완료", message)
+                QMessageBox.information(self, localization.get_string("asset_browser.save_success.title"), message)
                 
                 # UI 업데이트
                 self.asset_browser.update_texture_list()
-                self.statusBar().showMessage(f"파일 저장 완료: {file_path}")
+                self.statusBar().showMessage(localization.get_string("main_window.status_saving_complete", file_path=file_path))
                 
                 if self.texture_modified_since_load:
                     self.image_editor.restore_button.setEnabled(True)
@@ -757,12 +803,12 @@ class MainWindow(QMainWindow):
                     try:
                         # 디렉토리 내 모든 파일 삭제
                         for filename in os.listdir(temp_backup_dir):
-                            file_path = os.path.join(temp_backup_dir, filename)
+                            file_path_to_delete = os.path.join(temp_backup_dir, filename)
                             try:
-                                if os.path.isfile(file_path):
-                                    os.remove(file_path)
+                                if os.path.isfile(file_path_to_delete):
+                                    os.remove(file_path_to_delete)
                             except Exception as e:
-                                print(f"임시 파일 삭제 오류: {str(e)} - {file_path}")
+                                print(f"임시 파일 삭제 오류: {str(e)} - {file_path_to_delete}")
                         
                         # 디렉토리 삭제
                         os.rmdir(temp_backup_dir)
@@ -775,19 +821,19 @@ class MainWindow(QMainWindow):
                         # 오류가 나도 백업 디렉토리는 초기화
                         self.backup_manager.backup_dir = None
             else:
-                QMessageBox.critical(self, "오류", f"파일을 저장할 수 없습니다: {file_path}")
+                QMessageBox.critical(self, localization.get_string("error.save_file.title"), localization.get_string("error.save_file.message", file_path=file_path))
     
     def create_backup(self):
         """현재 파일의 백업 생성"""
         if not self.current_file_path:
-            QMessageBox.warning(self, "경고", "백업할 파일이 로드되지 않았습니다.")
+            QMessageBox.warning(self, localization.get_string("warning.no_file_to_backup.title"), localization.get_string("warning.no_file_to_backup.message"))
             return
         
         backup_path = self.backup_manager.create_backup(self.current_file_path)
         if backup_path:
-            QMessageBox.information(self, "백업 완료", f"백업 파일이 생성되었습니다:\n{backup_path}")
+            QMessageBox.information(self, localization.get_string("image_editor.restore_success.title"), localization.get_string("main_window.create_backup_success", path=backup_path))
         else:
-            QMessageBox.critical(self, "오류", "백업을 생성할 수 없습니다.")
+            QMessageBox.critical(self, localization.get_string("error.backup_creation.failed.title"), localization.get_string("error.backup_creation_failed.message"))
     
     def on_texture_selected(self, texture_obj, texture_data):
         """텍스처 선택 시 처리"""
@@ -798,9 +844,10 @@ class MainWindow(QMainWindow):
         """텍스처 교체 시 처리"""
         self.image_preview.refresh()
         
-        # 수정 상태 표시
-        if not self.windowTitle().endswith(" *"):
-             self.setWindowTitle(self.windowTitle() + " *")
+        # 수정 상태 표시 (번역 적용)
+        title = self.windowTitle()
+        if not title.endswith(" *"):
+             self.setWindowTitle(title + " *")
         
         self.texture_modified_since_load = True
         self.image_editor.restore_button.setEnabled(False)
@@ -813,74 +860,50 @@ class MainWindow(QMainWindow):
                 icon = QIcon(icon_path)
                 about_box = QMessageBox(self)
                 about_box.setIconPixmap(icon.pixmap(64, 64))  # 아이콘 크기 설정
-                about_box.setWindowTitle("SPT 에셋 에디터 정보")
+                about_box.setWindowTitle(localization.get_string("dialog.about.title"))
                 about_box.setTextFormat(Qt.RichText)
                 about_box.setText(
-                    f"<h3>{__app_name__} v{__version__}</h3>"
-                    f"<p>{__description__}</p>"
-                    f"<p>이 프로그램은 타르코프 관련 에셋 파일(.assets, .bundle)을 "
-                    f"보기 쉽게 보여주고 내부의 텍스처를 수정할 수 있도록 도와줍니다.</p>"
-                    f"<p><b>제작자:</b> {__author__}</p>"
-                    f"<p>{__copyright__}</p>"
+                    localization.get_string("dialog.about.text", 
+                      app_name=__app_name__, version=__version__, 
+                      description=__description__, author=__author__, copyright=__copyright__)
                 )
                 about_box.exec_()
             else:
                 # 아이콘이 없을 경우 기본 메시지 박스 사용
                 QMessageBox.about(
                     self,
-                    "SPT 에셋 에디터 정보",
-                    f"{__app_name__} v{__version__}\n\n"
-                    f"{__description__}\n\n"
-                    f"{__copyright__}"
+                    localization.get_string("dialog.about.default.title"),
+                    localization.get_string("dialog.about.default.text")
                 )
         except Exception as e:
             # 오류 발생 시 기본 정보 표시
             QMessageBox.about(
                 self,
-                "SPT 에셋 에디터 정보",
-                "SPT 에셋 에디터\n\n"
-                "SPT 타르코프 게임의 .assets 및 .bundle 파일에서 텍스처를 "
-                "추출, 미리보기, 수정 및 복원할 수 있는 도구입니다.\n\n"
-                "© 2025 Golani11"
+                localization.get_string("dialog.about.default.title"),
+                localization.get_string("dialog.about.default.text")
             )
     
     def show_asset_structure_info(self):
         """Unity 에셋 구조 정보 표시"""
         QMessageBox.information(
             self,
-            "Unity 에셋 구조 정보",
-            "<h3>Unity 에셋 파일 구조 안내</h3>"
-            "<p>Unity 게임의 에셋은 다음과 같은 파일들로 구성됩니다:</p>"
-            "<ul>"
-            "<li><b>.assets 파일</b>: 에셋 메타데이터와 작은 리소스를 저장합니다.</li>"
-            "<li><b>.resS 파일</b>: 큰 리소스 데이터(주로 텍스처, 오디오 등)를 저장합니다.</li>"
-            "<li><b>.bundle 파일</b>: 여러 에셋을 하나로 묶은 번들 파일로, 게임에 바로 로드될 수 있습니다.</li>"
-            "</ul>"
-            "<p>텍스처 이미지를 수정할 때 다음 사항에 주의하세요:</p>"
-            "<ul>"
-            "<li>텍스처의 실제 이미지 데이터는 보통 .resS 파일에 저장됩니다.</li>"
-            "<li>텍스처 수정이 게임에 올바르게 적용되려면 .assets 파일과 관련된 .resS 파일이 모두 필요합니다.</li>"
-            "<li>항상 원본 .assets 파일이 있는 폴더에 관련 .resS 파일이 있는지 확인하세요.</li>"
-            "<li>에셋 편집기는 파일 저장 시 자동으로 관련 .resS 파일을 찾아 함께 복사합니다.</li>"
-            "<li>번들 파일(.bundle)은 필요한 모든 자원을 포함하고 있어 별도의 .resS 파일이 필요하지 않습니다.</li>"
-            "</ul>"
-            "<p>텍스처 로드 오류가 발생하면 관련 .resS 파일이 없거나 손상되었을 가능성이 높습니다.</p>"
+            localization.get_string("dialog.asset_info.title"),
+            localization.get_string("dialog.asset_info.text")
         )
     
     def cleanup_temp_files(self):
         """백업 폴더의 임시 리소스 파일 정리"""
         if not self.backup_manager.ensure_backup_directory():
             QMessageBox.warning(
-                self, "경고", 
-                "백업 폴더가 존재하지 않거나 접근할 수 없습니다."
+                self, localization.get_string("warning.backup_dir_invalid.title"), 
+                localization.get_string("warning.backup_dir_invalid.message")
             )
             return
             
         reply = QMessageBox.question(
             self,
-            "임시 파일 정리",
-            "백업 폴더에서 임시 리소스 파일(.resS)들을 정리하시겠습니까?\n\n"
-            "이 작업은 백업 폴더에 있는 모든 임시 리소스 파일을 삭제합니다.",
+            localization.get_string("dialog.cleanup_temp.title"),
+            localization.get_string("dialog.cleanup_temp.confirm"),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
         )
@@ -891,53 +914,16 @@ class MainWindow(QMainWindow):
             if deleted_count > 0:
                 QMessageBox.information(
                     self,
-                    "정리 완료",
-                    f"총 {deleted_count}개의 임시 리소스 파일이 삭제되었습니다."
+                    localization.get_string("dialog.cleanup_temp.title"),
+                    localization.get_string("dialog.cleanup_temp.success", count=deleted_count)
                 )
             else:
                 QMessageBox.information(
                     self,
-                    "정리 완료",
-                    "삭제할 임시 리소스 파일이 없습니다."
+                    localization.get_string("dialog.cleanup_temp.title"),
+                    localization.get_string("dialog.cleanup_temp.no_files")
                 )
     
     def closeEvent(self, event):
         """윈도우 닫기 이벤트 처리"""
         event.accept()
-
-    def toggle_auto_backup(self, checked):
-        """자동 백업 설정 토글 - 더 이상 사용되지 않음"""
-        # 강제 백업이 적용되었으므로 이 함수는 더 이상 사용되지 않음
-        self.statusBar().showMessage("백업은 항상 자동으로 수행됩니다", 3000)
-    
-    def save_auto_backup_preference(self, preference):
-        """자동 백업 설정 저장 - 항상 True로 설정"""
-        # 백업이 필수이므로 항상 True로 설정
-        try:
-            settings_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "settings")
-            os.makedirs(settings_dir, exist_ok=True)
-            
-            settings_file = os.path.join(settings_dir, "backup_preferences.json")
-            
-            # 기존 설정 로드 또는 새로 생성
-            if os.path.exists(settings_file):
-                with open(settings_file, 'r', encoding='utf-8') as f:
-                    settings = json.load(f)
-            else:
-                settings = {}
-            
-            # 항상 True로 설정
-            settings['auto_backup'] = True
-            
-            with open(settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4)
-                
-            return True
-        except Exception as e:
-            print(f"자동 백업 설정 저장 오류: {str(e)}")
-            return False
-
-    def get_auto_backup_preference(self):
-        """자동 백업 설정 로드 - 항상 True 반환"""
-        # 백업이 필수이므로 항상 True 반환
-        return True

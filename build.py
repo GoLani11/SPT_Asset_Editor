@@ -7,7 +7,7 @@ import UnityPy
 
 # --- 설정 ---
 APP_NAME = "SPTAssetEditor"
-APP_VERSION = "1.0.3"  # <<--- 버전 정보 정의 (이곳만 수정하면 됩니다)
+APP_VERSION = "1.0.4"  # <<--- 버전 정보 정의 (이곳만 수정하면 됩니다)
 ENTRY_POINT = os.path.join("src", "main.py")
 ICON_FILE = os.path.join("resources", "icon.ico") # 아이콘 파일 경로 (실제 파일 확인 필요)
 DIST_PATH = "dist" # 빌드 결과물이 저장될 폴더

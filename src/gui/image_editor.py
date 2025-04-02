@@ -1,6 +1,6 @@
 import os
 import sys
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QGroupBox, QProgressBar
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QGroupBox, QProgressBar, QToolButton, QFrame
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PIL import Image
@@ -10,6 +10,10 @@ from PyQt5.QtWidgets import QApplication
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.image_resizer import ImageResizer
+from utils.resource_helper import get_resource_path
+from utils import localization
+from core.backup_manager import BackupManager
+from core.texture_processor import TextureProcessor
 
 
 class ImageEditor(QWidget):
@@ -20,7 +24,7 @@ class ImageEditor(QWidget):
     # 텍스처 교체 시그널
     texture_replaced = pyqtSignal()
     
-    def __init__(self, texture_processor, backup_manager):
+    def __init__(self, texture_processor: TextureProcessor, backup_manager: BackupManager):
         super().__init__()
         
         self.texture_processor = texture_processor
@@ -44,6 +48,9 @@ class ImageEditor(QWidget):
         # 임시 파일 정리
         self._clean_temp_files()
         
+        # 초기 UI 텍스트 업데이트 호출
+        self.update_ui_texts()
+        
     def init_ui(self):
         """
         UI 컴포넌트 초기화
@@ -52,22 +59,28 @@ class ImageEditor(QWidget):
         layout = QVBoxLayout(self)
         
         # 제목 레이블
-        title_label = QLabel("이미지 교체 및 리사이징")
-        title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(title_label)
+        self.title_label = QLabel(localization.get_string("image_editor.title"))
+        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 5px;")
+        layout.addWidget(self.title_label)
+        
+        # 이미지 없음 안내 레이블
+        self.no_image_label = QLabel(localization.get_string("image_editor.no_image_label"))
+        self.no_image_label.setAlignment(Qt.AlignCenter)
+        self.no_image_label.setStyleSheet("color: #888; font-style: italic;")
+        layout.addWidget(self.no_image_label)
         
         # 이미지 교체 그룹
-        replace_group = QGroupBox("커스텀 이미지 선택")
-        replace_layout = QVBoxLayout(replace_group)
+        self.replace_group = QGroupBox(localization.get_string("image_editor.replace_group_title"))
+        replace_layout = QVBoxLayout(self.replace_group)
         
         # 이미지 선택 버튼 및 경로 표시
         select_layout = QHBoxLayout()
         
-        self.select_button = QPushButton("이미지 선택...")
+        self.select_button = QPushButton(localization.get_string("image_editor.select_button"))
         self.select_button.clicked.connect(self.select_image)
         select_layout.addWidget(self.select_button)
         
-        self.path_label = QLabel("선택된 이미지: 없음")
+        self.path_label = QLabel(localization.get_string("image_editor.path_label_default"))
         select_layout.addWidget(self.path_label, 1)
         
         replace_layout.addLayout(select_layout)
@@ -77,7 +90,8 @@ class ImageEditor(QWidget):
         
         # 원본 이미지 미리보기
         original_layout = QVBoxLayout()
-        original_layout.addWidget(QLabel("원본 이미지:"))
+        self.original_label_text = QLabel(localization.get_string("image_editor.original_image_label"))
+        original_layout.addWidget(self.original_label_text)
         self.original_image_label = QLabel()
         self.original_image_label.setAlignment(Qt.AlignCenter)
         self.original_image_label.setStyleSheet("background-color: #f0f0f0;")
@@ -88,7 +102,8 @@ class ImageEditor(QWidget):
         
         # 새 이미지 미리보기
         new_layout = QVBoxLayout()
-        new_layout.addWidget(QLabel("새 이미지:"))
+        self.new_label_text = QLabel(localization.get_string("image_editor.new_image_label"))
+        new_layout.addWidget(self.new_label_text)
         self.new_image_label = QLabel()
         self.new_image_label.setAlignment(Qt.AlignCenter)
         self.new_image_label.setStyleSheet("background-color: #f0f0f0;")
@@ -100,7 +115,7 @@ class ImageEditor(QWidget):
         replace_layout.addLayout(preview_layout)
         
         # 리사이징 정보
-        self.resize_info_label = QLabel("원본 해상도에 맞게 자동으로 리사이징됩니다.")
+        self.resize_info_label = QLabel(localization.get_string("image_editor.resize_info_label"))
         replace_layout.addWidget(self.resize_info_label)
         
         # 리사이징 진행 상태
@@ -108,25 +123,102 @@ class ImageEditor(QWidget):
         self.resize_progress.setVisible(False)
         replace_layout.addWidget(self.resize_progress)
         
-        layout.addWidget(replace_group)
+        layout.addWidget(self.replace_group)
         
         # 버튼 레이아웃
         button_layout = QHBoxLayout()
         
         # 교체 버튼
-        self.replace_button = QPushButton("이미지 교체")
-        self.replace_button.clicked.connect(self.replace_image)
+        self.replace_button = QToolButton()
+        self.replace_button.setText(localization.get_string("image_editor.replace_button"))
+        self.replace_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.replace_button.setEnabled(False)
+        self.replace_button.setStyleSheet("""
+            QToolButton {
+                background-color: #4CAF50;
+                color: white;
+                border-radius: 5px;
+                padding: 10px;
+            }
+            QToolButton:hover {
+                background-color: #45a049;
+            }
+            QToolButton:pressed {
+                background-color: #367c39;
+            }
+            QToolButton:disabled {
+                background-color: #A0A0A0;
+                color: #D0D0D0;
+            }
+        """)
+        self.replace_button.clicked.connect(self.replace_image)
         button_layout.addWidget(self.replace_button)
         
         # 원본 복원 버튼
-        self.restore_button = QPushButton("원본 복원")
-        self.restore_button.clicked.connect(self.restore_original)
+        self.restore_button = QToolButton()
+        self.restore_button.setText(localization.get_string("image_editor.restore_button"))
+        self.restore_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.restore_button.setEnabled(False)
+        self.restore_button.setStyleSheet("""
+            QToolButton {
+                background-color: #f44336;
+                color: white;
+                border-radius: 5px;
+                padding: 10px;
+            }
+            QToolButton:hover {
+                background-color: #d32f2f;
+            }
+            QToolButton:pressed {
+                background-color: #b71c1c;
+            }
+            QToolButton:disabled {
+                background-color: #A0A0A0;
+                color: #D0D0D0;
+            }
+        """)
+        self.restore_button.clicked.connect(self.restore_original)
         button_layout.addWidget(self.restore_button)
         
+        button_layout.addStretch()
         layout.addLayout(button_layout)
         
+        # 구분선
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(line)
+        
+        layout.addStretch()
+        
+        # 초기 상태 숨김
+        self.replace_group.hide() # 초기에는 숨김
+        self.no_image_label.show()
+        
+    def update_ui_texts(self):
+        """UI 텍스트 업데이트"""
+        self.title_label.setText(localization.get_string("image_editor.title"))
+        self.no_image_label.setText(localization.get_string("image_editor.no_image_label"))
+        self.replace_button.setText(localization.get_string("image_editor.replace_button"))
+        self.restore_button.setText(localization.get_string("image_editor.restore_button"))
+        # 필요시 다른 UI 요소들의 텍스트도 여기서 업데이트
+        
+        # 이미지 교체 그룹박스 제목 업데이트
+        self.replace_group.setTitle(localization.get_string("image_editor.replace_group_title"))
+        self.select_button.setText(localization.get_string("image_editor.select_button"))
+        
+        # 경로 레이블은 set_texture에서 업데이트됨
+        if not self.new_image_path:
+            self.path_label.setText(localization.get_string("image_editor.path_label_default"))
+        else:
+            # 파일 경로가 있으면 해당 경로로 설정
+            self.path_label.setText(localization.get_string("image_editor.path_label_selected", path=os.path.basename(self.new_image_path)))
+            
+        # 원본/새 이미지 레이블 텍스트 업데이트
+        self.original_label_text.setText(localization.get_string("image_editor.original_image_label"))
+        self.new_label_text.setText(localization.get_string("image_editor.new_image_label"))
+        self.resize_info_label.setText(localization.get_string("image_editor.resize_info_label"))
+    
     def set_texture(self, texture_obj, texture_data):
         """
         현재 텍스처 설정
@@ -157,7 +249,7 @@ class ImageEditor(QWidget):
         # 새 이미지 초기화
         self.new_image_path = None
         self.resized_image_path = None
-        self.path_label.setText("선택된 이미지: 없음")
+        self.path_label.setText(localization.get_string("image_editor.path_label_default"))
         self.new_image_label.clear()
         
         # 원본 이미지 표시
@@ -179,32 +271,31 @@ class ImageEditor(QWidget):
                 img_data = img.tobytes('raw', 'RGB')
             
             q_image = QImage(img_data, width, height, bytes_per_line, q_format)
-            pixmap = QPixmap.fromImage(q_image)
             
-            # 원본 비율 유지하면서 적절한 크기로 스케일링
-            scaled_pixmap = pixmap.scaled(200, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.original_image_label.setPixmap(scaled_pixmap)
+            # 이미지 크기 조정 및 표시
+            pixmap = QPixmap.fromImage(q_image)
+            self.original_image_label.setPixmap(
+                pixmap.scaled(self.original_image_label.size(), 
+                              Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+            self.no_image_label.hide()
+            self.replace_group.show() # 그룹박스 표시
+            self.replace_button.setEnabled(False)
+            self.restore_button.setEnabled(self._has_backup())
         else:
             self.original_image_label.clear()
+            self.no_image_label.show()
+            self.replace_group.hide() # 그룹박스 숨김
+            self.replace_button.setEnabled(False)
+            self.restore_button.setEnabled(False)
         
-        # 버튼 상태 업데이트
-        self.replace_button.setEnabled(False)
-        self.restore_button.setEnabled(False)  # 처음에는 복원 버튼 비활성화
-        
-        # 리사이징 정보 업데이트
-        if texture_data:
-            self.resize_info_label.setText(
-                f"원본 해상도: {texture_data.m_Width}x{texture_data.m_Height} - 자동으로 리사이징됩니다."
-            )
-        else:
-            self.resize_info_label.setText("원본 해상도에 맞게 자동으로 리사이징됩니다.")
-    
     def select_image(self):
         """
         이미지 파일 선택 대화상자 표시
         """
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "이미지 선택", "", "이미지 파일 (*.png *.jpg *.jpeg *.bmp *.tga);;모든 파일 (*.*)"
+            self, localization.get_string("image_editor.replace_dialog.title"), "", 
+            localization.get_string("image_editor.replace_dialog.filter")
         )
         
         if file_path:
@@ -236,7 +327,7 @@ class ImageEditor(QWidget):
                 
                 # 경로 저장 및 표시
                 self.new_image_path = file_path
-                self.path_label.setText(f"선택된 이미지: {os.path.basename(file_path)}")
+                self.path_label.setText(localization.get_string("image_editor.path_label_selected", path=os.path.basename(file_path)))
                 
                 # 교체 버튼 활성화
                 self.replace_button.setEnabled(True)
@@ -282,7 +373,8 @@ class ImageEditor(QWidget):
                         # 잠시 후 진행 상태 바 숨기기
                         QTimer.singleShot(2000, lambda: self.resize_progress.setVisible(False))
             except Exception as e:
-                QMessageBox.critical(self, "오류", f"이미지를 로드할 수 없습니다: {str(e)}")
+                QMessageBox.critical(self, localization.get_string("image_editor.replace_error.title"), 
+                                   f"{localization.get_string('image_editor.load_error.message')}: {str(e)}")
     
     def replace_image(self):
         """
@@ -306,7 +398,7 @@ class ImageEditor(QWidget):
             
         except Exception as e:
             self.resize_progress.setVisible(False)
-            QMessageBox.critical(self, "오류", f"이미지 교체 중 오류가 발생했습니다: {str(e)}")
+            QMessageBox.critical(self, localization.get_string("image_editor.replace_error.title"), f"이미지 교체 중 오류가 발생했습니다: {str(e)}")
             print(f"이미지 교체 오류: {str(e)}")
     
     def _optimize_resize(self, image, target_width, target_height):
@@ -443,23 +535,24 @@ class ImageEditor(QWidget):
                     
                     if resized_img.mode != 'RGBA':
                         # 새 이미지에 투명도가 없는 경우
-                        transparency_msg = "원본 이미지는 투명도가 있지만, 선택한 이미지는 투명도가 없습니다.\n"
-                        transparency_msg += "원본 이미지의 투명도를 선택한 이미지에 적용하시겠습니까?"
+                        transparency_msg = localization.get_string("image_editor.replace_confirm.message",
+                                    orig_w=self.current_texture_data.m_Width, orig_h=self.current_texture_data.m_Height,
+                                    new_w=target_width, new_h=target_height)
+                        transparency_msg += "\n" + localization.get_string("image_editor.replace_confirm.transparency_question")
                         apply_transparency = True
                     else:
                         # 두 이미지 모두 투명도가 있는 경우
-                        transparency_msg = "선택한 이미지와 원본 이미지 모두 투명도가 있습니다.\n"
-                        transparency_msg += "원본 이미지의 투명도 패턴으로 교체하시겠습니까?"
+                        transparency_msg = localization.get_string("image_editor.replace_confirm.message",
+                                    orig_w=self.current_texture_data.m_Width, orig_h=self.current_texture_data.m_Height,
+                                    new_w=target_width, new_h=target_height)
+                        transparency_msg += "\n" + localization.get_string("image_editor.replace_confirm.transparency_question")
                         apply_transparency = True
                         
                     if apply_transparency:
                         # 투명도 적용 옵션 대화상자
                         reply = QMessageBox.question(
-                            self, 
-                            "투명도 적용", 
-                            transparency_msg,
-                            QMessageBox.Yes | QMessageBox.No,
-                            QMessageBox.Yes
+                            self, localization.get_string("image_editor.replace_confirm.title"), transparency_msg,
+                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                         )
                         
                         if reply == QMessageBox.Yes:
@@ -517,7 +610,7 @@ class ImageEditor(QWidget):
                 # 완료 메시지는 상태바에만 표시
                 main_window = self.window()  # 현재 위젯의 최상위 윈도우 가져오기
                 if hasattr(main_window, 'statusBar'):
-                    main_window.statusBar().showMessage("이미지 교체 완료", 3000)
+                    main_window.statusBar().showMessage(localization.get_string("image_editor.replace_success.message"), 3000)
                 QTimer.singleShot(1000, lambda: self.resize_progress.setVisible(False))
                 
                 # 상태 업데이트
@@ -533,40 +626,41 @@ class ImageEditor(QWidget):
             self.resize_progress.setVisible(False)
             
             # 오류 메시지 표시
-            QMessageBox.critical(self, "오류", f"이미지 리사이징 중 오류가 발생했습니다:\n{str(e)}")
+            QMessageBox.critical(self, localization.get_string("image_editor.replace_error.title"), f"이미지 리사이징 중 오류가 발생했습니다:\n{str(e)}")
             print(f"이미지 리사이징 오류: {str(e)}")
     
     def restore_original(self):
         """
         가장 최근에 저장 시 생성된 백업 파일로 복원합니다.
         """
-        # MainWindow 참조 및 현재 파일 경로 확인
+        if not self.current_texture_data:
+            return
+        
         main_window = self.window()
         if not hasattr(main_window, 'current_file_path') or not main_window.current_file_path:
-            QMessageBox.warning(self, "경고", "현재 로드된 파일 경로를 찾을 수 없습니다.")
+            QMessageBox.warning(self, localization.get_string("image_editor.restore_no_file.title"), 
+                              localization.get_string("image_editor.restore_no_file.message"))
             return
+            
         current_file_path = main_window.current_file_path
-
-        # 가장 최신의 저장 백업 파일 찾기 ('_save_' 포함)
-        # print(f"[DEBUG] restore_original: 초기 백업 검색 대상 파일 경로: {current_file_path}") # 이전 로그 주석 처리
-        latest_save_backup_path = self.backup_manager.find_latest_save_backup(current_file_path)
         
-        if not latest_save_backup_path or not os.path.exists(latest_save_backup_path):
-            # print(f"[DEBUG] restore_original: 초기 백업 파일을 찾지 못함 (find_initial_backup 결과: {initial_backup_path})") # 이전 로그 주석 처리
-            print(f"[DEBUG] restore_original: 최신 저장 백업 파일을 찾지 못함 (find_latest_save_backup 결과: {latest_save_backup_path})")
-            QMessageBox.warning(self, "경고", "가장 최근에 저장된 백업 파일을 찾을 수 없습니다. 원본을 복원할 수 없습니다.\n(파일 저장 시 백업을 생성했는지 확인하세요.)")
+        # 최신 "저장" 시점의 백업 찾기 (자동 백업 아님)
+        latest_save_backup_path = self.backup_manager.get_latest_backup(current_file_path) # 저장 시 백업만 고려
+        
+        if not latest_save_backup_path:
+            QMessageBox.warning(self, localization.get_string("image_editor.restore_no_backup.title"), 
+                              localization.get_string("image_editor.restore_no_backup.message"))
             return
-
-        # 복원 확인 메시지
+            
+        # 사용자 확인
+        backup_name = os.path.basename(latest_save_backup_path)
         reply = QMessageBox.question(
-            self, 
-            "파일 복원", 
-            f"현재 파일을 가장 최근 저장 시 생성된 백업 파일({os.path.basename(latest_save_backup_path)})로 덮어쓰시겠습니까?\n\n"
-            f"현재 편집 중인 내용은 사라집니다.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            self, localization.get_string("image_editor.restore_confirm.title"),
+            localization.get_string("image_editor.restore_confirm.message"),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
-        if reply == QMessageBox.No:
+        
+        if reply != QMessageBox.Yes:
             return
             
         try:
@@ -574,15 +668,62 @@ class ImageEditor(QWidget):
             import shutil
             shutil.copy2(latest_save_backup_path, current_file_path)
             
-            QMessageBox.information(self, "성공", f"파일이 가장 최근 저장 백업({os.path.basename(latest_save_backup_path)})으로 복원되었습니다.\n파일을 다시 로드합니다.")
+            QMessageBox.information(self, localization.get_string("image_editor.restore_success.title"), 
+                                    localization.get_string("image_editor.restore_success.message", backup_name=backup_name))
             
             # MainWindow의 파일 로딩 함수 호출하여 변경사항 반영
-            # (주의: AssetsManager는 MainWindow가 관리하므로 직접 호출)
-            main_window.start_loading(current_file_path)
+            if hasattr(main_window, 'start_loading'):
+                 main_window.start_loading(current_file_path)
             
-            # 복원 후 버튼 비활성화
+            # 복원 후 버튼 비활성화 (백업이 없으므로)
             self.restore_button.setEnabled(False)
             
         except Exception as e:
-            QMessageBox.critical(self, "오류", f"파일 복원 중 오류 발생: {str(e)}")
-            print(f"파일 복원 오류: {str(e)}")
+            QMessageBox.critical(self, localization.get_string("image_editor.restore_error.title"), localization.get_string("image_editor.restore_error.message", error=str(e)))
+            print(f"백업 복원 오류: {str(e)}")
+    
+    def _has_backup(self):
+        """현재 파일에 대한 백업이 있는지 확인"""
+        # 메인 윈도우의 현재 파일 경로 가져오기
+        main_window = self.window()
+        if not main_window or not hasattr(main_window, 'current_file_path') or not main_window.current_file_path:
+            return False
+        
+        # BackupManager를 사용하여 최신 백업 확인
+        return self.backup_manager.get_latest_backup(main_window.current_file_path) is not None
+
+    def _create_backup_before_modify(self) -> bool:
+        """수정하기 전에 현재 상태를 백업합니다."""
+        if not self.current_texture_data:
+            return False
+        
+        main_window = self.window()
+        if not hasattr(main_window, 'current_file_path') or not main_window.current_file_path:
+            return False
+            
+        current_file_path = main_window.current_file_path
+        
+        # 현재 파일 상태를 임시 저장 후 백업 생성 (더 안전한 방법)
+        temp_save_path = os.path.join(self.backup_manager.get_backup_directory(), f"temp_before_modify_{os.path.basename(current_file_path)}")
+        
+        if not main_window.assets_manager.save_file(temp_save_path, copy_resource_files=False):
+             QMessageBox.critical(self, localization.get_string("error.backup_creation.title"), 
+                                localization.get_string("image_editor.backup_temp_save_failed.message"))
+             return False
+        
+        # 임시 저장된 파일을 기반으로 백업 생성
+        backup_path = self.backup_manager.create_backup(temp_save_path, prefix="modify_") 
+        
+        # 임시 저장 파일 삭제
+        try:
+            os.remove(temp_save_path)
+        except Exception as e:
+            print(f"백업용 임시 파일 삭제 오류: {str(e)}")
+            
+        if backup_path:
+            print(f"수정 전 백업 생성 완료: {backup_path}")
+            return True
+        else:
+            QMessageBox.critical(self, localization.get_string("error.backup_creation.title"), 
+                                localization.get_string("error.backup_creation_failed.message"))
+            return False

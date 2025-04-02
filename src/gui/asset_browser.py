@@ -9,6 +9,8 @@ from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread
 # 상위 디렉토리를 시스템 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils import localization
+
 class ThumbnailLoaderThread(QThread):
     """텍스처 썸네일을 비동기적으로 생성하는 스레드"""
     thumbnail_ready = pyqtSignal(int, QIcon, bool)  # (인덱스, 아이콘, 성공여부)
@@ -71,6 +73,9 @@ class AssetBrowser(QWidget):
         
         self.init_ui()
         
+        # 초기 UI 텍스트 업데이트
+        self.update_ui_texts()
+        
     def init_ui(self):
         """UI 구성"""
         layout = QVBoxLayout(self)
@@ -84,13 +89,13 @@ class AssetBrowser(QWidget):
         header_layout.setSpacing(5)
         
         # 제목
-        title_label = QLabel("에셋 브라우저")
-        title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(title_label)
+        self.title_label = QLabel(localization.get_string("asset_browser.title"))
+        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        header_layout.addWidget(self.title_label)
         
         # 검색 필드
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("텍스처 검색...")
+        self.search_input.setPlaceholderText(localization.get_string("asset_browser.search_placeholder"))
         self.search_input.setStyleSheet("""
             QLineEdit {
                 border-radius: 5px;
@@ -127,7 +132,7 @@ class AssetBrowser(QWidget):
             }
         """)
         self.texture_list.itemClicked.connect(self.on_texture_selected)
-        layout.addWidget(self.texture_list)
+        layout.addWidget(self.texture_list, 1) # 목록 위젯이 남은 공간을 차지하도록 설정
         
         # 정보 및 버튼 영역
         info_buttons_widget = QWidget()
@@ -136,15 +141,15 @@ class AssetBrowser(QWidget):
         info_buttons_layout.setSpacing(5)
         
         # 정보 표시 레이블
-        self.info_label = QLabel("로드된 텍스처: 0개")
+        self.info_label = QLabel(localization.get_string("asset_browser.info_label_loaded", count=0))
         self.info_label.setStyleSheet("color: #424242;")
         self.info_label.setAlignment(Qt.AlignCenter)
         info_buttons_layout.addWidget(self.info_label)
         
         # 알파값 제거 체크박스
-        self.remove_alpha_checkbox = QCheckBox("PNG 저장 시 투명도(알파값) 제거하기")
-        self.remove_alpha_checkbox.setChecked(False)  # 기본값으로 비활성화
-        self.remove_alpha_checkbox.setToolTip("PNG 파일 저장 시 투명도를 제거하고 불투명한 이미지로 저장합니다.\n이미지 편집 프로그램에서 더 보기 쉽게 작업할 수 있습니다.\n그러나 이 이미지로 수정 후 다시 적용하려고 할 때\n원본 이미지 투명도 패턴으로 교체하는 것을 추천합니다.")
+        self.remove_alpha_checkbox = QCheckBox(localization.get_string("asset_browser.remove_alpha_checkbox"))
+        self.remove_alpha_checkbox.setChecked(True)  # 기본값으로 체크
+        self.remove_alpha_checkbox.setToolTip(localization.get_string("asset_browser.remove_alpha_tooltip"))
         self.remove_alpha_checkbox.setStyleSheet("""
             QCheckBox {
                 color: #424242;
@@ -154,7 +159,7 @@ class AssetBrowser(QWidget):
         info_buttons_layout.addWidget(self.remove_alpha_checkbox)
         
         # 저장 버튼
-        self.save_button = QPushButton("원본 텍스처 저장")
+        self.save_button = QPushButton(localization.get_string("asset_browser.save_original_button"))
         self.save_button.setEnabled(False)  # 초기에는 비활성화
         self.save_button.setStyleSheet("""
             QPushButton {
@@ -180,6 +185,41 @@ class AssetBrowser(QWidget):
         
         layout.addWidget(info_buttons_widget)
         
+        # 초기 상태 비활성화
+        self.save_button.setEnabled(False)
+        
+    def update_ui_texts(self):
+        """UI 텍스트 업데이트"""
+        self.title_label.setText(localization.get_string("asset_browser.title"))
+        self.search_input.setPlaceholderText(localization.get_string("asset_browser.search_placeholder"))
+        # info_label은 내용이 동적으로 변하므로 filter_textures, update_texture_list 등에서 업데이트
+        self.remove_alpha_checkbox.setText(localization.get_string("asset_browser.remove_alpha_checkbox"))
+        self.remove_alpha_checkbox.setToolTip(localization.get_string("asset_browser.remove_alpha_tooltip"))
+        self.save_button.setText(localization.get_string("asset_browser.save_original_button"))
+        
+        # 현재 목록 상태에 따라 info_label 업데이트
+        self.update_info_label()
+        
+    def update_info_label(self):
+        """현재 필터링 및 로드 상태에 따라 정보 레이블 업데이트"""
+        search_text = self.search_input.text().lower()
+        visible_count = sum(1 for i in range(self.texture_list.count()) if not self.texture_list.item(i).isHidden())
+        total_count = self.texture_list.count()
+        
+        if search_text:
+            self.info_label.setText(localization.get_string("asset_browser.info_label_filtered", visible_count=visible_count, total_count=total_count))
+        else:
+            # 스레드 상태 확인 후 로딩 중/완료 메시지 표시
+            if self.thumb_loader_thread and self.thumb_loader_thread.isRunning():
+                self.info_label.setText(localization.get_string("asset_browser.info_label_loading"))
+            else:
+                # 로딩 완료 후 성공/실패 정보 표시
+                failed_count = getattr(self, '_last_failed_count', 0)
+                if failed_count > 0:
+                    self.info_label.setText(localization.get_string("asset_browser.info_label_failed", loaded_count=total_count, failed_count=failed_count))
+                else:
+                    self.info_label.setText(localization.get_string("asset_browser.info_label_loaded", count=total_count))
+            
     def filter_textures(self, search_text):
         """검색어에 따라 텍스처 목록 필터링"""
         # 항목 필터링
@@ -198,9 +238,9 @@ class AssetBrowser(QWidget):
         total_count = self.texture_list.count()
         
         if search_text:
-            self.info_label.setText(f"검색 결과: {visible_count}/{total_count}개")
+            self.info_label.setText(localization.get_string("asset_browser.info_label_filtered", visible_count=visible_count, total_count=total_count))
         else:
-            self.info_label.setText(f"로드된 텍스처: {total_count}개")
+            self.info_label.setText(localization.get_string("asset_browser.info_label_loaded", count=total_count))
             
     def update_texture_list(self):
         """텍스처 목록 업데이트 및 비동기 썸네일 로딩"""
@@ -212,7 +252,7 @@ class AssetBrowser(QWidget):
         # UI 초기화
         self.texture_list.clear()
         self.textures = {}
-        self.info_label.setText("텍스처 목록 로딩 중...")
+        self.info_label.setText(localization.get_string("asset_browser.info_label_loading"))
         self.search_input.clear()
 
         # 텍스처 메타데이터 가져오기
@@ -236,7 +276,8 @@ class AssetBrowser(QWidget):
                 self.textures[texture_info['id']] = (obj, data)
                 textures_to_load.append((index, data))
             else:
-                item.setText(f"{texture_info['name']} ({texture_info['width']}x{texture_info['height']}) - 로드 실패")
+                item.setIcon(QIcon()) # 로딩 실패 시 빈 아이콘
+                print(f"썸네일 업데이트 오류: {index}")
 
         # 썸네일 로딩 스레드 시작
         if textures_to_load:
@@ -245,7 +286,7 @@ class AssetBrowser(QWidget):
             self.thumb_loader_thread.loading_finished.connect(self.on_thumbnails_loaded)
             self.thumb_loader_thread.start()
         else:
-            self.info_label.setText("로드된 텍스처: 0개")
+            self.info_label.setText(localization.get_string("asset_browser.info_label_loaded", count=0))
             
     def on_thumbnail_ready(self, index, icon, success):
         """썸네일 준비 완료 시 처리"""
@@ -261,9 +302,9 @@ class AssetBrowser(QWidget):
     def on_thumbnails_loaded(self, loaded_count, failed_count):
         """모든 썸네일 로딩 완료 시 처리"""
         if failed_count > 0:
-            self.info_label.setText(f"로드된 텍스처: {loaded_count}개 (썸네일 로드 실패: {failed_count}개)")
+            self.info_label.setText(localization.get_string("asset_browser.info_label_failed", loaded_count=loaded_count, failed_count=failed_count))
         else:
-            self.info_label.setText(f"로드된 텍스처: {loaded_count}개")
+            self.info_label.setText(localization.get_string("asset_browser.info_label_loaded", count=loaded_count))
         self.thumb_loader_thread = None
 
     def on_texture_selected(self, item):
@@ -274,6 +315,9 @@ class AssetBrowser(QWidget):
             self.current_selected_texture = (obj, data)
             self.save_button.setEnabled(True)  # 텍스처 선택 시 저장 버튼 활성화
             self.texture_selected.emit(obj, data)
+        else:
+             self.current_selected_texture = None
+             self.save_button.setEnabled(False)
     
     def save_original_texture(self):
         """선택된 원본 텍스처를 저장하는 함수"""
@@ -285,9 +329,9 @@ class AssetBrowser(QWidget):
         
         # 파일 저장 대화상자
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "원본 텍스처 저장",
+            self, localization.get_string("asset_browser.save_dialog.title"),
             f"{texture_name}",
-            "PNG 이미지 (*.png);;TGA 이미지 (*.tga);;모든 파일 (*.*)"
+            localization.get_string("asset_browser.save_dialog.filter")
         )
         
         if not file_path:
@@ -330,20 +374,19 @@ class AssetBrowser(QWidget):
             
             # 성공 메시지
             from PyQt5.QtWidgets import QMessageBox
-            success_message = f"텍스처가 성공적으로 저장되었습니다:\n{file_path}"
-            
-            # 알파값 제거 정보 추가
             if alpha_removed:
-                success_message += f"\n\n원본 이미지 형식: {original_mode}\n투명도(알파값)가 제거되었습니다."
+                success_message = localization.get_string("asset_browser.save_success.message_alpha_removed", file_path=file_path, original_mode=original_mode)
+            else:
+                success_message = localization.get_string("asset_browser.save_success.message", file_path=file_path)
             
             QMessageBox.information(
-                self, "저장 성공",
+                self, localization.get_string("asset_browser.save_success.title"),
                 success_message
             )
         except Exception as e:
             # 오류 메시지
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(
-                self, "저장 오류",
-                f"텍스처 저장 중 오류가 발생했습니다:\n{str(e)}"
+                self, localization.get_string("asset_browser.save_error.title"),
+                localization.get_string("asset_browser.save_error.message", error=str(e))
             )

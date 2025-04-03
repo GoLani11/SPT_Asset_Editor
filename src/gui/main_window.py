@@ -584,7 +584,7 @@ class MainWindow(QMainWindow):
                 save_successful = True
                 saved_to_path = self.current_file_path
             else:
-                 QMessageBox.critical(self, localization.get_string("error.save_file.title"), localization.get_string("error.save_file.message"))
+                QMessageBox.critical(self, localization.get_string("error.save_file.title"), localization.get_string("error.save_file.message", file_path=self.current_file_path))
         
         # 저장 성공 후 처리
         if save_successful and saved_to_path:
@@ -761,12 +761,12 @@ class MainWindow(QMainWindow):
                     self,
                     localization.get_string("dialog.ress_copy.title"),
                     localization.get_string("dialog.ress_copy.message"),
-                    copy_button + "|" + dont_copy_button,
-                    copy_button
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
                 )
                 
-                # 버튼 텍스트 기반으로 결과 확인
-                should_copy_ress = (reply == 0)
+                # QMessageBox.Yes는 0, QMessageBox.No는 1을 반환
+                should_copy_ress = (reply == QMessageBox.Yes)
                 
             # 파일 저장
             save_successful = self.assets_manager.save_file(file_path, copy_resource_files=should_copy_ress)

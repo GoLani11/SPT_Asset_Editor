@@ -20,6 +20,32 @@ except ImportError:
 except Exception as e:
     logger.warning(f"texture2ddecoder 라이브러리 로드 중 오류 발생: {str(e)}")
 
+# <<< 수정: UnityPy 관련 import 경로 변경 및 BC7 파라미터 로드 >>>
+from UnityPy.enums import TextureFormat
+try:
+    # UnityPy.export 모듈에서 BC7CompressBlockParams 클래스를 가져옵니다. (새로운 예상 경로)
+    from UnityPy.export import BC7CompressBlockParams
+    bc7_params_available = True
+    logger.info("BC7CompressBlockParams 로드 성공 (UnityPy.export).")
+except ImportError:
+    try:
+        # 이전 경로 시도 (UnityPy.classes.Texture2D)
+        from UnityPy.classes.Texture2D import BC7CompressBlockParams
+        bc7_params_available = True
+        logger.info("BC7CompressBlockParams 로드 성공 (UnityPy.classes.Texture2D).")
+    except ImportError as e:
+        # 최종 실패
+        logging.warning(f"BC7CompressBlockParams 로드 실패 (ImportError): {e}. BC7 포맷 저장이 제한될 수 있습니다.")
+        BC7CompressBlockParams = None
+        bc7_params_available = False
+except Exception as e:
+    # 다른 예외 처리
+    logging.warning(f"BC7CompressBlockParams 로드 중 예외 발생: {e}. BC7 포맷 저장이 제한될 수 있습니다.")
+    BC7CompressBlockParams = None
+    bc7_params_available = False
+# <<< 끝: UnityPy 관련 import >>>
+
+
 class TextureProcessor:
     """
     Texture2D 이미지를 추출, 수정 및 리사이징하는 클래스
@@ -444,99 +470,136 @@ class TextureProcessor:
             return Image.new('RGB', size, color='gray')
     
     def replace_texture(self, texture_obj: Any, texture_data: Any, new_image_path: str) -> bool:
-        """
+        \"\"\"
         Texture2D 객체의 이미지를 새 이미지로 교체합니다.
-        
+
         Args:
             texture_obj: 텍스처 객체
-            texture_data: 텍스처 데이터 객체
+            texture_data: 텍스처 데이터 객체 (이 인자는 사용되지 않음)
             new_image_path: 새 이미지 파일 경로
-            
+
         Returns:
             bool: 교체 성공 여부
-        """
+        \"\"\"
         try:
             # 새 이미지 로드
             new_image = Image.open(new_image_path)
-            
-            # 텍스처 데이터 읽기 (texture_data 파라미터 활용)
-            data = texture_obj.read() if texture_data is None else texture_data
-            
+
+            # 텍스처 데이터 읽기
+            data = texture_obj.read()
+
             # 원본 이미지 크기 확인
             original_width = data.m_Width
             original_height = data.m_Height
-            
+
             # 원본 이미지 크기에 맞게 리사이징
             if (original_width != new_image.width or original_height != new_image.height):
                 print(f"이미지 리사이징: {new_image.width}x{new_image.height} -> {original_width}x{original_height}")
                 new_image = new_image.resize((original_width, original_height), Image.LANCZOS)
-            
+
             # 이미지 데이터 교체
+            # 이 시점에서 UnityPy의 setter가 호출되어 변환/압축 시도
             data.image = new_image
-            
+
+            # <<< 중요: BC7 포맷 처리 >>>
+            # 포맷 설정은 유지하되, 파라미터 직접 할당은 제거
+            # UnityPy setter가 BC7CompressBlockParams 클래스를 찾아서 사용하도록 기대
+            if data.m_TextureFormat == TextureFormat.BC7:
+                logger.info("텍스처 포맷을 BC7로 유지합니다.")
+                if not bc7_params_available:
+                     logger.warning("BC7CompressBlockParams 클래스를 로드할 수 없어 BC7 포맷 저장이 실패할 수 있습니다.")
+            # <<< 끝: BC7 포맷 처리 >>>
+
             # 변경사항 저장
+            # save() 호출 시 추가 압축/변환이 발생할 수 있음
             data.save()
-            
+
             return True
+        except ValueError as ve: # 구체적인 ValueError 처리
+             if "params must be an instance of BC7CompressBlockParams" in str(ve):
+                 logger.error(f"텍스처 교체 오류: BC7 압축 파라미터 필요. UnityPy 버전 호환성 문제일 수 있습니다. {ve}")
+                 print(f"텍스처 교체 오류: BC7 압축 파라미터가 필요합니다. UnityPy 내부 처리 문제일 수 있습니다.")
+             else:
+                 logger.error(f"텍스처 교체 중 값 오류: {ve}")
+                 print(f"텍스처 교체 중 값 오류: {ve}")
+             import traceback
+             print(traceback.format_exc())
+             return False
         except Exception as e:
+            logger.error(f"텍스처 교체 오류: {str(e)}")
             print(f"텍스처 교체 오류: {str(e)}")
+            import traceback
+            print(traceback.format_exc()) # 상세 트레이스백 출력
             return False
-    
+
     def restore_texture(self, texture_obj: Any, original_image: Image.Image) -> bool:
-        """
+        \"\"\"
         Texture2D 객체의 이미지를 원본 이미지로 복원합니다.
-        
+
         Args:
             texture_obj: 텍스처 객체
             original_image: 원본 PIL 이미지 객체
-            
+
         Returns:
             bool: 복원 성공 여부
-        """
+        \"\"\"
         try:
             if not texture_obj:
                 print("텍스처 객체가 없습니다.")
                 return False
-                
+
             if not original_image:
                 print("원본 이미지가 없습니다.")
                 return False
-                
+
             # 텍스처 데이터 읽기
             data = texture_obj.read()
-            
+
             if not data:
                 print("텍스처 데이터를 읽을 수 없습니다.")
                 return False
-                
-            # 이미지 크기 일치 여부 확인
+
+            # 이미지 크기 일치 여부 확인 및 조정
             if hasattr(data, 'm_Width') and hasattr(data, 'm_Height'):
                 if data.m_Width != original_image.width or data.m_Height != original_image.height:
                     print(f"이미지 크기 불일치: 원본({original_image.width}x{original_image.height}) vs 텍스처({data.m_Width}x{data.m_Height})")
-                    # 크기 조정
                     original_image = original_image.resize((data.m_Width, data.m_Height), Image.LANCZOS)
                     print(f"이미지 크기 조정됨: {data.m_Width}x{data.m_Height}")
-            
-            # 이미지 모드 확인
-            if hasattr(data, 'image') and data.image.mode != original_image.mode:
-                print(f"이미지 모드 변환: {original_image.mode} -> {data.image.mode}")
-                original_image = original_image.convert(data.image.mode)
-            
+
             # 이미지 데이터 복원
             data.image = original_image
-            
+
+            # <<< 중요: 원본 포맷 및 파라미터 복원 >>>
+            # BC7 포맷인 경우, UnityPy setter가 처리하도록 기대
+            if data.m_TextureFormat == TextureFormat.BC7:
+                logger.info("원본 복원 시 텍스처 포맷을 BC7로 유지합니다.")
+                if not bc7_params_available:
+                     logger.warning("BC7CompressBlockParams 클래스를 로드할 수 없어 BC7 포맷 복원이 실패할 수 있습니다.")
+            # <<< 끝: 원본 포맷 및 파라미터 복원 >>>
+
             # 변경사항 저장
             data.save()
-            
+
             print("텍스처가 원본으로 복원되었습니다.")
             return True
+        except ValueError as ve: # 구체적인 ValueError 처리
+             if "params must be an instance of BC7CompressBlockParams" in str(ve):
+                 logger.error(f"텍스처 복원 오류: BC7 압축 파라미터 필요. UnityPy 버전 호환성 문제일 수 있습니다. {ve}")
+                 print(f"텍스처 복원 오류: BC7 압축 파라미터가 필요합니다. UnityPy 내부 처리 문제일 수 있습니다.")
+             else:
+                 logger.error(f"텍스처 복원 중 값 오류: {ve}")
+                 print(f"텍스처 복원 중 값 오류: {ve}")
+             import traceback
+             print(traceback.format_exc())
+             return False
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
+            logger.error(f"텍스처 복원 오류: {str(e)}\\n{error_traceback}")
             print(f"텍스처 복원 오류: {str(e)}")
             print(error_traceback)
             return False
-    
+
     def get_texture_info(self, texture_data: Any) -> Dict[str, Any]:
         """
         Texture2D 객체의 상세 정보를 반환합니다.

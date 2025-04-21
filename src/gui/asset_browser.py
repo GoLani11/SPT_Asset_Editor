@@ -1,8 +1,9 @@
 import os
 import sys
+import time
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                            QListWidget, QListWidgetItem, QLineEdit, QPushButton, QFileDialog,
-                           QCheckBox)
+                           QCheckBox, QMessageBox, QDialog, QDialogButtonBox)
 from PyQt5.QtGui import QPixmap, QImage, QIcon
 from PyQt5.QtCore import Qt, pyqtSignal, QSize, QThread
 
@@ -55,6 +56,114 @@ class ThumbnailLoaderThread(QThread):
     def stop(self):
         self._is_running = False
 
+class BundleFileSelector(QDialog):
+    """번들 파일 선택 대화상자"""
+    
+    def __init__(self, bundle_files, parent=None):
+        super().__init__(parent)
+        self.bundle_files = bundle_files
+        self.selected_file = None
+        self.init_ui()
+        
+    def init_ui(self):
+        """UI 초기화"""
+        self.setWindowTitle(localization.get_string("asset_browser.bundle_selector.title"))
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(400)
+        
+        layout = QVBoxLayout(self)
+        
+        # 안내 레이블
+        info_label = QLabel(localization.get_string("asset_browser.bundle_selector.info"))
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        # 파일 목록
+        self.file_list = QListWidget()
+        self.file_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #CCCCCC;
+                background-color: #E3E5FA;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QListWidget::item {
+                border-radius: 5px;
+                padding: 8px;
+                margin: 2px 0px;
+            }
+            QListWidget::item:selected {
+                background-color: #B5C7E1;
+            }
+            QListWidget::item:hover {
+                background-color: #D4D6F0;
+            }
+        """)
+        self.file_list.itemDoubleClicked.connect(self.accept)
+        layout.addWidget(self.file_list)
+        
+        # 파일 정보 레이블
+        self.info_label = QLabel(localization.get_string("asset_browser.bundle_selector.file_count", count=len(self.bundle_files)))
+        layout.addWidget(self.info_label)
+        
+        # 버튼
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        # 파일 목록 채우기
+        self.populate_file_list()
+        
+    def populate_file_list(self):
+        """파일 목록 채우기"""
+        for file_path in self.bundle_files:
+            file_name = os.path.basename(file_path)
+            file_size = os.path.getsize(file_path)
+            
+            # 파일 크기를 보기 좋게 변환 (KB/MB)
+            if file_size < 1024 * 1024:  # 1MB 미만
+                size_text = f"{file_size / 1024:.1f} KB"
+            else:
+                size_text = f"{file_size / (1024 * 1024):.2f} MB"
+                
+            # 마지막 수정 시간
+            mod_time = os.path.getmtime(file_path)
+            mod_time_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(mod_time))
+            
+            # 표시 텍스트 생성
+            display_text = f"{file_name} ({size_text}, {mod_time_str})"
+            
+            file_item = QListWidgetItem(display_text)
+            file_item.setData(Qt.UserRole, file_path)
+            # 아이콘 추가 (번들 파일 아이콘 또는 기본 아이콘)
+            icon = QIcon.fromTheme("package-x-generic")
+            if not icon or icon.isNull():
+                # 기본 아이콘 (테마 아이콘이 없는 경우)
+                file_item.setIcon(QIcon())
+            else:
+                file_item.setIcon(icon)
+                
+            self.file_list.addItem(file_item)
+            
+        # 첫 번째 항목 선택
+        if self.file_list.count() > 0:
+            self.file_list.setCurrentRow(0)
+            
+    def accept(self):
+        """대화상자 수락 (OK 버튼)"""
+        current_item = self.file_list.currentItem()
+        if current_item:
+            self.selected_file = current_item.data(Qt.UserRole)
+            super().accept()
+        else:
+            QMessageBox.warning(
+                self,
+                localization.get_string("error.file_not_found.title"),
+                localization.get_string("asset_browser.bundle_selector.no_selection"),
+                QMessageBox.Ok
+            )
+
 class AssetBrowser(QWidget):
     """에셋 파일 내 텍스처 목록을 표시하고 탐색하는 위젯"""
     
@@ -92,6 +201,31 @@ class AssetBrowser(QWidget):
         self.title_label = QLabel(localization.get_string("asset_browser.title"))
         self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
         header_layout.addWidget(self.title_label)
+        
+        # 포스트 아이템 이미지 변경 버튼 (제목 아래, 검색창 위에 배치)
+        self.post_item_button = QPushButton(localization.get_string("asset_browser.post_item_button"))
+        self.post_item_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4AD075;
+                color: white;
+                border-radius: 5px;
+                padding: 8px;
+                margin-top: 5px;
+                margin-bottom: 5px;
+            }
+            QPushButton:hover {
+                background-color: #3AC065;
+            }
+            QPushButton:pressed {
+                background-color: #2AB055;
+            }
+            QPushButton:disabled {
+                background-color: #A0A0A0;
+                color: #D0D0D0;
+            }
+        """)
+        self.post_item_button.clicked.connect(self.load_post_item_images)
+        header_layout.addWidget(self.post_item_button)
         
         # 검색 필드
         self.search_input = QLineEdit()
@@ -148,7 +282,7 @@ class AssetBrowser(QWidget):
         
         # 알파값 제거 체크박스
         self.remove_alpha_checkbox = QCheckBox(localization.get_string("asset_browser.remove_alpha_checkbox"))
-        self.remove_alpha_checkbox.setChecked(True)  # 기본값으로 체크
+        self.remove_alpha_checkbox.setChecked(False)  # 기본값으로 체크 해제
         self.remove_alpha_checkbox.setToolTip(localization.get_string("asset_browser.remove_alpha_tooltip"))
         self.remove_alpha_checkbox.setStyleSheet("""
             QCheckBox {
@@ -196,6 +330,7 @@ class AssetBrowser(QWidget):
         self.remove_alpha_checkbox.setText(localization.get_string("asset_browser.remove_alpha_checkbox"))
         self.remove_alpha_checkbox.setToolTip(localization.get_string("asset_browser.remove_alpha_tooltip"))
         self.save_button.setText(localization.get_string("asset_browser.save_original_button"))
+        self.post_item_button.setText(localization.get_string("asset_browser.post_item_button"))
         
         # 현재 목록 상태에 따라 info_label 업데이트
         self.update_info_label()
@@ -373,7 +508,6 @@ class AssetBrowser(QWidget):
                 print(f"이미지 저장: {file_path} (원본 포맷 유지)")
             
             # 성공 메시지
-            from PyQt5.QtWidgets import QMessageBox
             if alpha_removed:
                 success_message = localization.get_string("asset_browser.save_success.message_alpha_removed", file_path=file_path, original_mode=original_mode)
             else:
@@ -385,8 +519,103 @@ class AssetBrowser(QWidget):
             )
         except Exception as e:
             # 오류 메시지
-            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.critical(
                 self, localization.get_string("asset_browser.save_error.title"),
                 localization.get_string("asset_browser.save_error.message", error=str(e))
             )
+
+    def load_post_item_images(self):
+        """포스트 아이템 이미지 파일 로드 다이얼로그"""
+        # 먼저 안내 메시지 표시
+        QMessageBox.information(
+            self,
+            localization.get_string("asset_browser.spt_folder_dialog.title"),
+            localization.get_string("asset_browser.spt_folder_guide"),
+            QMessageBox.Ok
+        )
+        
+        # SPT 폴더 선택 다이얼로그
+        spt_folder = QFileDialog.getExistingDirectory(
+            self, localization.get_string("asset_browser.spt_folder_dialog.title"), "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+        
+        if not spt_folder:
+            return
+            
+        # 본섭 타르코프 경로 확인 (main_window.py의 open_assets_file 메소드와 유사한 검증)
+        be_exe_path = os.path.join(spt_folder, "EscapeFromTarkov_BE.exe")
+        battle_eye_dir = os.path.join(spt_folder, "BattlEye")
+        bepinex_dir = os.path.join(spt_folder, "BepInEx")
+        
+        # 본섭 타르코프 파일 확인
+        if os.path.exists(be_exe_path) and os.path.isdir(battle_eye_dir):
+            QMessageBox.critical(
+                self,
+                localization.get_string("live_tarkov_warning.title"),
+                localization.get_string("asset_browser.spt_error.live_tarkov"),
+                QMessageBox.Ok
+            )
+            return
+            
+        # SPT 폴더에 BepInEx 폴더가 없는 경우
+        if not os.path.isdir(bepinex_dir):
+            QMessageBox.critical(
+                self,
+                localization.get_string("error.file_not_found.title"),
+                localization.get_string("asset_browser.spt_error.invalid_folder"),
+                QMessageBox.Ok
+            )
+            return
+            
+        # 포스트 아이템 플라이어 경로
+        flyers_path = os.path.join(
+            spt_folder,
+            "EscapeFromTarkov_Data",
+            "StreamingAssets",
+            "Windows",
+            "assets",
+            "content",
+            "items",
+            "barter",
+            "item_barter_flyers"
+        )
+        
+        if not os.path.exists(flyers_path):
+            QMessageBox.critical(
+                self,
+                localization.get_string("error.file_not_found.title"),
+                localization.get_string("asset_browser.spt_error.flyers_not_found", path=flyers_path),
+                QMessageBox.Ok
+            )
+            return
+            
+        # 번들 파일 찾기
+        bundle_files = []
+        for file in os.listdir(flyers_path):
+            if file.endswith(".bundle"):
+                bundle_files.append(os.path.join(flyers_path, file))
+                
+        if not bundle_files:
+            QMessageBox.critical(
+                self,
+                localization.get_string("error.file_not_found.title"),
+                localization.get_string("asset_browser.spt_error.no_bundles"),
+                QMessageBox.Ok
+            )
+            return
+            
+        # 번들 파일 선택 대화상자 표시
+        dialog = BundleFileSelector(bundle_files, self)
+        if dialog.exec_() == QDialog.Accepted and dialog.selected_file:
+            # 파일 로드를 메인 윈도우에 위임
+            parent = self.window()
+            if hasattr(parent, 'start_loading') and callable(parent.start_loading):
+                parent.start_loading(dialog.selected_file)
+            else:
+                QMessageBox.critical(
+                    self,
+                    localization.get_string("error.file_load.title"),
+                    localization.get_string("asset_browser.spt_error.load_failed"),
+                    QMessageBox.Ok
+                )

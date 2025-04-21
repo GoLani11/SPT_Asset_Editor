@@ -65,6 +65,20 @@
     "asset_browser.save_error.title": "저장 오류",
     "asset_browser.save_error.message": "텍스처 저장 중 오류가 발생했습니다:\n{error}",
 
+    "asset_browser.post_item_button": "포스트 아이템 이미지 변경",
+    "asset_browser.spt_folder_dialog.title": "SPT 폴더를 선택해주세요.",
+    "asset_browser.spt_folder_guide": "SPT 폴더를 선택해주세요.\n\n이 기능은 SPT 타르코프 게임의 포스트 아이템 이미지를 수정할 수 있도록 해당 번들 파일들을 불러옵니다.",
+    "asset_browser.spt_error.live_tarkov": "본섭 타르코프 폴더는 선택할 수 없습니다!",
+    "asset_browser.spt_error.invalid_folder": "선택한 폴더는 SPT 설치 폴더가 아닙니다. BepInEx 폴더가 없습니다.",
+    "asset_browser.spt_error.flyers_not_found": "아이템 플라이어 경로를 찾을 수 없습니다:\n{path}",
+    "asset_browser.spt_error.no_bundles": "번들 파일을 찾을 수 없습니다.",
+    "asset_browser.spt_error.load_failed": "파일을 로드할 수 없습니다.",
+
+    "asset_browser.bundle_selector.title": "번들 파일 선택",
+    "asset_browser.bundle_selector.info": "아래 목록에서 로드할 번들 파일을 선택하세요. 파일을 더블 클릭하거나 선택한 후 '확인' 버튼을 누르면 해당 파일이 로드됩니다.",
+    "asset_browser.bundle_selector.file_count": "발견된 번들 파일: {count}개",
+    "asset_browser.bundle_selector.no_selection": "파일을 선택해주세요.",
+
     "image_preview.title": "이미지 미리보기",
     "image_preview.no_preview_label": "미리볼 이미지가 없습니다",
     "image_preview.info_label": "{width}x{height} - {format}",

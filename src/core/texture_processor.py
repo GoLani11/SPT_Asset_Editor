@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 texture2ddecoder_available = False
 try:
     from texture2ddecoder import decode_bc1, decode_bc3, decode_bc4, decode_bc5, decode_bc6, decode_bc7, decode_etc1, decode_etc2, decode_astc
+    from texture2ddecoder import encode_bc7, encode_etc1, encode_astc  # 인코딩 함수도 가져옵니다
     texture2ddecoder_available = True
     logger.info("texture2ddecoder 라이브러리 로드 성공")
 except ImportError:
@@ -20,30 +21,7 @@ except ImportError:
 except Exception as e:
     logger.warning(f"texture2ddecoder 라이브러리 로드 중 오류 발생: {str(e)}")
 
-# <<< 수정: UnityPy 관련 import 경로 변경 및 BC7 파라미터 로드 >>>
 from UnityPy.enums import TextureFormat
-try:
-    # UnityPy.export 모듈에서 BC7CompressBlockParams 클래스를 가져옵니다. (새로운 예상 경로)
-    from UnityPy.export import BC7CompressBlockParams
-    bc7_params_available = True
-    logger.info("BC7CompressBlockParams 로드 성공 (UnityPy.export).")
-except ImportError:
-    try:
-        # 이전 경로 시도 (UnityPy.classes.Texture2D)
-        from UnityPy.classes.Texture2D import BC7CompressBlockParams
-        bc7_params_available = True
-        logger.info("BC7CompressBlockParams 로드 성공 (UnityPy.classes.Texture2D).")
-    except ImportError as e:
-        # 최종 실패
-        logging.warning(f"BC7CompressBlockParams 로드 실패 (ImportError): {e}. BC7 포맷 저장이 제한될 수 있습니다.")
-        BC7CompressBlockParams = None
-        bc7_params_available = False
-except Exception as e:
-    # 다른 예외 처리
-    logging.warning(f"BC7CompressBlockParams 로드 중 예외 발생: {e}. BC7 포맷 저장이 제한될 수 있습니다.")
-    BC7CompressBlockParams = None
-    bc7_params_available = False
-# <<< 끝: UnityPy 관련 import >>>
 
 
 class TextureProcessor:
@@ -470,7 +448,7 @@ class TextureProcessor:
             return Image.new('RGB', size, color='gray')
     
     def replace_texture(self, texture_obj: Any, texture_data: Any, new_image_path: str) -> bool:
-        \"\"\"
+        """
         Texture2D 객체의 이미지를 새 이미지로 교체합니다.
 
         Args:
@@ -480,7 +458,7 @@ class TextureProcessor:
 
         Returns:
             bool: 교체 성공 여부
-        \"\"\"
+        """
         try:
             # 새 이미지 로드
             new_image = Image.open(new_image_path)
@@ -497,34 +475,191 @@ class TextureProcessor:
                 print(f"이미지 리사이징: {new_image.width}x{new_image.height} -> {original_width}x{original_height}")
                 new_image = new_image.resize((original_width, original_height), Image.LANCZOS)
 
-            # 이미지 데이터 교체
-            # 이 시점에서 UnityPy의 setter가 호출되어 변환/압축 시도
+            # 원본 텍스처 포맷 저장
+            original_format = data.m_TextureFormat
+            
+            # 원본 이미지에서 투명도 정보 가져오기
+            original_img = None
+            try:
+                original_img = self.get_texture_preview(texture_data)
+                logger.info(f"원본 이미지 투명도 정보 가져옴, 모드: {original_img.mode}")
+            except Exception as e:
+                logger.warning(f"원본 이미지 투명도 정보를 가져오는 데 실패했습니다: {str(e)}")
+                
+            # 이미지에 투명도가 있는지 확인
+            has_transparency = new_image.mode == 'RGBA' or 'A' in new_image.mode
+            
+            # 투명도 처리를 위해 항상 RGBA 모드로 변환
+            if new_image.mode != 'RGBA':
+                logger.info(f"이미지 모드를 RGBA로 변환합니다: {new_image.mode} -> RGBA")
+                if new_image.mode == 'RGB':
+                    new_image = new_image.convert('RGBA')
+                else:
+                    # 다른 모드인 경우 RGB로 먼저 변환 후 RGBA로 변환
+                    new_image = new_image.convert('RGB').convert('RGBA')
+            
+            # 원본 이미지가 있고 투명도 정보가 있는 경우 투명도 정보 보존
+            if original_img and original_img.mode == 'RGBA' and not has_transparency:
+                logger.info("원본 이미지의 투명도 정보를 새 이미지에 적용합니다")
+                
+                # 이미지 크기가 다른 경우 원본 이미지의 알파 채널을 리사이징
+                if original_img.size != new_image.size:
+                    original_img = original_img.resize(new_image.size, Image.LANCZOS)
+                
+                # 원본 이미지에서 알파 채널 추출
+                _, _, _, alpha = original_img.split()
+                
+                # 새 이미지에 원본 알파 채널 적용
+                r, g, b, _ = new_image.split()
+                new_image = Image.merge('RGBA', (r, g, b, alpha))
+                has_transparency = True
+                print("원본 텍스처의 투명도 정보가 새 이미지에 적용되었습니다")
+            
+            if has_transparency:
+                logger.info(f"투명도가 있는 이미지가 감지되었습니다. 모드: {new_image.mode}")
+                print("투명도가 있는 이미지를 처리합니다")
+            else:
+                logger.info(f"투명도가 없는 이미지입니다. 모드: {new_image.mode}")
+                print("투명도가 없는 이미지를 처리합니다")
+            
+            # 텍스처 포맷에 따른 처리
+            texture_format_lower = str(original_format).lower() if original_format else ""
+            
+            # 압축 포맷 처리 여부 결정
+            if texture2ddecoder_available and texture_format_lower:
+                try:
+                    # 압축 포맷 처리 결과 플래그
+                    encoded_success = False
+                    
+                    # BC7 처리
+                    if "bc7" in texture_format_lower and hasattr(encode_bc7, '__call__'):
+                        logger.info(f"BC7 압축 포맷 유지 시도: {original_format}")
+                        print(f"BC7 압축 포맷 유지를 시도합니다.")
+                        # 이미지 데이터를 numpy 배열로 변환
+                        img_array = np.array(new_image)
+                        # 이미지가 상하 반전되어 있으므로 다시 반전
+                        img_array = np.flip(img_array, axis=0)
+                        # BC7로 인코딩
+                        encoded_data = encode_bc7(img_array)
+                        if encoded_data:
+                            # 인코딩된 데이터 설정
+                            if hasattr(data, 'set_image_data'):
+                                data.set_image_data(encoded_data)
+                            else:
+                                # 직접 이미지 데이터 설정
+                                for attr_name in ['image_data', 'image_data_block', 'data', 'm_Data']:
+                                    if hasattr(data, attr_name):
+                                        setattr(data, attr_name, encoded_data)
+                                        logger.info(f"BC7 데이터를 {attr_name}에 설정했습니다.")
+                                        break
+                            # 원본 텍스처 포맷 유지
+                            encoded_success = True
+                            print("BC7 압축 포맷으로 인코딩 성공")
+                        else:
+                            logger.warning("BC7 인코딩 실패, 기본 방식으로 전환합니다.")
+                    
+                    # ASTC 처리
+                    elif "astc" in texture_format_lower and hasattr(encode_astc, '__call__'):
+                        logger.info(f"ASTC 압축 포맷 유지 시도: {original_format}")
+                        print(f"ASTC 압축 포맷 유지를 시도합니다.")
+                        # 블록 크기 결정 (기본값: 4x4)
+                        block_size = getattr(data, 'block_size', (4, 4))
+                        # 이미지 데이터를 numpy 배열로 변환
+                        img_array = np.array(new_image)
+                        # 이미지가 상하 반전되어 있으므로 다시 반전
+                        img_array = np.flip(img_array, axis=0)
+                        # ASTC로 인코딩
+                        encoded_data = encode_astc(img_array, block_size[0], block_size[1])
+                        if encoded_data:
+                            # 인코딩된 데이터 설정
+                            if hasattr(data, 'set_image_data'):
+                                data.set_image_data(encoded_data)
+                            else:
+                                # 직접 이미지 데이터 설정
+                                for attr_name in ['image_data', 'image_data_block', 'data', 'm_Data']:
+                                    if hasattr(data, attr_name):
+                                        setattr(data, attr_name, encoded_data)
+                                        logger.info(f"ASTC 데이터를 {attr_name}에 설정했습니다.")
+                                        break
+                            # 원본 텍스처 포맷 유지
+                            encoded_success = True
+                            print("ASTC 압축 포맷으로 인코딩 성공")
+                        else:
+                            logger.warning("ASTC 인코딩 실패, 기본 방식으로 전환합니다.")
+                    
+                    # ETC1 처리
+                    elif ("etc_rgb4" in texture_format_lower or "etc1" in texture_format_lower) and hasattr(encode_etc1, '__call__'):
+                        logger.info(f"ETC1 압축 포맷 유지 시도: {original_format}")
+                        print(f"ETC1 압축 포맷 유지를 시도합니다.")
+                        # 이미지 데이터를 numpy 배열로 변환
+                        img_array = np.array(new_image)
+                        # 이미지가 상하 반전되어 있으므로 다시 반전
+                        img_array = np.flip(img_array, axis=0)
+                        # ETC1로 인코딩
+                        encoded_data = encode_etc1(img_array)
+                        if encoded_data:
+                            # 인코딩된 데이터 설정
+                            if hasattr(data, 'set_image_data'):
+                                data.set_image_data(encoded_data)
+                            else:
+                                # 직접 이미지 데이터 설정
+                                for attr_name in ['image_data', 'image_data_block', 'data', 'm_Data']:
+                                    if hasattr(data, attr_name):
+                                        setattr(data, attr_name, encoded_data)
+                                        logger.info(f"ETC1 데이터를 {attr_name}에 설정했습니다.")
+                                        break
+                            # 원본 텍스처 포맷 유지
+                            encoded_success = True
+                            print("ETC1 압축 포맷으로 인코딩 성공")
+                        else:
+                            logger.warning("ETC1 인코딩 실패, 기본 방식으로 전환합니다.")
+                    
+                    # 다른 압축 포맷들 처리
+                    else:
+                        logger.warning(f"지원하지 않는 압축 포맷: {original_format}")
+                        print(f"{original_format} 압축 포맷은 아직 직접 인코딩을 지원하지 않습니다.")
+                    
+                    # 인코딩 성공 여부에 따라 처리
+                    if encoded_success:
+                        data.save()
+                        return True
+                    else:
+                        # 압축 인코딩 실패 시 RGBA32로 변환하여 저장
+                        print("압축 인코딩 실패: RGBA32 포맷으로 변환합니다.")
+                        data.m_TextureFormat = TextureFormat.RGBA32
+                        data.image = new_image
+                        data.save()
+                        return True
+                    
+                except Exception as e:
+                    logger.error(f"압축 포맷 인코딩 오류: {str(e)}")
+                    print(f"압축 포맷 인코딩 중 오류 발생: {str(e)}")
+                    # 실패했을 경우 RGBA32로 폴백
+                    print("RGBA32 포맷으로 대체합니다.")
+                    data.m_TextureFormat = TextureFormat.RGBA32
+            else:
+                # texture2ddecoder 라이브러리를 사용할 수 없는 경우
+                compressed_formats = [TextureFormat.BC7, TextureFormat.BC4, TextureFormat.BC5, TextureFormat.BC6H, 
+                                    TextureFormat.DXT1, TextureFormat.DXT5]
+                
+                if original_format in compressed_formats:
+                    logger.info(f"{original_format} 압축 포맷 감지: 호환성을 위해 RGBA32 포맷으로 변환합니다.")
+                    print(f"{original_format} 압축 포맷이 감지되었습니다. texture2ddecoder가 사용 불가능하여 RGBA32 포맷으로 변환합니다.")
+                    data.m_TextureFormat = TextureFormat.RGBA32
+            
+            # 이미지 데이터 교체 (압축 인코딩 실패 또는 texture2ddecoder 비활성화 시)
             data.image = new_image
-
-            # <<< 중요: BC7 포맷 처리 >>>
-            # 포맷 설정은 유지하되, 파라미터 직접 할당은 제거
-            # UnityPy setter가 BC7CompressBlockParams 클래스를 찾아서 사용하도록 기대
-            if data.m_TextureFormat == TextureFormat.BC7:
-                logger.info("텍스처 포맷을 BC7로 유지합니다.")
-                if not bc7_params_available:
-                     logger.warning("BC7CompressBlockParams 클래스를 로드할 수 없어 BC7 포맷 저장이 실패할 수 있습니다.")
-            # <<< 끝: BC7 포맷 처리 >>>
-
+            
             # 변경사항 저장
-            # save() 호출 시 추가 압축/변환이 발생할 수 있음
             data.save()
-
+            
             return True
-        except ValueError as ve: # 구체적인 ValueError 처리
-             if "params must be an instance of BC7CompressBlockParams" in str(ve):
-                 logger.error(f"텍스처 교체 오류: BC7 압축 파라미터 필요. UnityPy 버전 호환성 문제일 수 있습니다. {ve}")
-                 print(f"텍스처 교체 오류: BC7 압축 파라미터가 필요합니다. UnityPy 내부 처리 문제일 수 있습니다.")
-             else:
-                 logger.error(f"텍스처 교체 중 값 오류: {ve}")
-                 print(f"텍스처 교체 중 값 오류: {ve}")
-             import traceback
-             print(traceback.format_exc())
-             return False
+        except ValueError as ve:
+            logger.error(f"텍스처 교체 중 값 오류: {ve}")
+            print(f"텍스처 교체 중 값 오류: {ve}")
+            import traceback
+            print(traceback.format_exc())
+            return False
         except Exception as e:
             logger.error(f"텍스처 교체 오류: {str(e)}")
             print(f"텍스처 교체 오류: {str(e)}")
@@ -533,7 +668,7 @@ class TextureProcessor:
             return False
 
     def restore_texture(self, texture_obj: Any, original_image: Image.Image) -> bool:
-        \"\"\"
+        """
         Texture2D 객체의 이미지를 원본 이미지로 복원합니다.
 
         Args:
@@ -542,7 +677,7 @@ class TextureProcessor:
 
         Returns:
             bool: 복원 성공 여부
-        \"\"\"
+        """
         try:
             if not texture_obj:
                 print("텍스처 객체가 없습니다.")
@@ -566,32 +701,81 @@ class TextureProcessor:
                     original_image = original_image.resize((data.m_Width, data.m_Height), Image.LANCZOS)
                     print(f"이미지 크기 조정됨: {data.m_Width}x{data.m_Height}")
 
+            # 원본 이미지의 투명도 처리를 위해 항상 RGBA 모드로 변환
+            if original_image.mode != 'RGBA':
+                logger.info(f"원본 이미지 모드를 RGBA로 변환합니다: {original_image.mode} -> RGBA")
+                if original_image.mode == 'RGB':
+                    original_image = original_image.convert('RGBA')
+                else:
+                    # 다른 모드인 경우 RGB로 먼저 변환 후 RGBA로 변환
+                    original_image = original_image.convert('RGB').convert('RGBA')
+
+            # 텍스처 포맷 처리
+            original_format = data.m_TextureFormat
+            texture_format_lower = str(original_format).lower() if original_format else ""
+            
+            # 압축 포맷 처리 (replace_texture 메서드와 동일한 로직)
+            if texture2ddecoder_available and texture_format_lower:
+                try:
+                    # BC7 처리
+                    if "bc7" in texture_format_lower and hasattr(encode_bc7, '__call__'):
+                        logger.info(f"BC7 압축 포맷 유지 시도 (복원): {original_format}")
+                        print(f"BC7 압축 포맷 유지를 시도합니다 (복원).")
+                        # 이미지 데이터를 numpy 배열로 변환
+                        img_array = np.array(original_image)
+                        # 이미지가 상하 반전되어 있으므로 다시 반전
+                        img_array = np.flip(img_array, axis=0)
+                        # BC7로 인코딩
+                        encoded_data = encode_bc7(img_array)
+                        if encoded_data:
+                            # 인코딩된 데이터 설정
+                            if hasattr(data, 'set_image_data'):
+                                data.set_image_data(encoded_data)
+                            else:
+                                # 직접 이미지 데이터 설정
+                                for attr_name in ['image_data', 'image_data_block', 'data', 'm_Data']:
+                                    if hasattr(data, attr_name):
+                                        setattr(data, attr_name, encoded_data)
+                                        logger.info(f"BC7 데이터를 {attr_name}에 설정했습니다.")
+                                        break
+                            data.save()
+                            return True
+                        else:
+                            logger.warning("BC7 인코딩 실패, 기본 방식으로 전환합니다.")
+                    
+                    # 다른 압축 포맷들 처리...
+                    # (replace_texture의 ASTC, ETC1 처리 코드와 유사하게 구현)
+                    else:
+                        # 지원하지 않는 포맷은 RGBA32로 변환
+                        data.m_TextureFormat = TextureFormat.RGBA32
+                except Exception as e:
+                    logger.error(f"압축 포맷 인코딩 오류 (복원): {str(e)}")
+                    # 실패했을 경우 RGBA32로 폴백
+                    data.m_TextureFormat = TextureFormat.RGBA32
+            else:
+                # texture2ddecoder 라이브러리를 사용할 수 없는 경우
+                compressed_formats = [TextureFormat.BC7, TextureFormat.BC4, TextureFormat.BC5, TextureFormat.BC6H, 
+                                    TextureFormat.DXT1, TextureFormat.DXT5]
+                
+                if original_format in compressed_formats:
+                    logger.info(f"{original_format} 압축 포맷 감지: 호환성을 위해 RGBA32 포맷으로 변환합니다.")
+                    print(f"{original_format} 압축 포맷이 감지되었습니다. texture2ddecoder가 사용 불가능하여 RGBA32 포맷으로 변환합니다.")
+                    data.m_TextureFormat = TextureFormat.RGBA32
+
             # 이미지 데이터 복원
             data.image = original_image
-
-            # <<< 중요: 원본 포맷 및 파라미터 복원 >>>
-            # BC7 포맷인 경우, UnityPy setter가 처리하도록 기대
-            if data.m_TextureFormat == TextureFormat.BC7:
-                logger.info("원본 복원 시 텍스처 포맷을 BC7로 유지합니다.")
-                if not bc7_params_available:
-                     logger.warning("BC7CompressBlockParams 클래스를 로드할 수 없어 BC7 포맷 복원이 실패할 수 있습니다.")
-            # <<< 끝: 원본 포맷 및 파라미터 복원 >>>
 
             # 변경사항 저장
             data.save()
 
             print("텍스처가 원본으로 복원되었습니다.")
             return True
-        except ValueError as ve: # 구체적인 ValueError 처리
-             if "params must be an instance of BC7CompressBlockParams" in str(ve):
-                 logger.error(f"텍스처 복원 오류: BC7 압축 파라미터 필요. UnityPy 버전 호환성 문제일 수 있습니다. {ve}")
-                 print(f"텍스처 복원 오류: BC7 압축 파라미터가 필요합니다. UnityPy 내부 처리 문제일 수 있습니다.")
-             else:
-                 logger.error(f"텍스처 복원 중 값 오류: {ve}")
-                 print(f"텍스처 복원 중 값 오류: {ve}")
-             import traceback
-             print(traceback.format_exc())
-             return False
+        except ValueError as ve:
+            logger.error(f"텍스처 복원 중 값 오류: {ve}")
+            print(f"텍스처 복원 중 값 오류: {ve}")
+            import traceback
+            print(traceback.format_exc())
+            return False
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()

@@ -531,39 +531,27 @@ class ImageEditor(QWidget):
                 
                 # 원본 이미지의 투명도 확인 및 적용
                 if self.original_texture_image and self.original_texture_image.mode == 'RGBA':
-                    apply_transparency = False
+                    # 이미지에 투명도가 있을 경우 항상 물어보기
+                    transparency_msg = localization.get_string("image_editor.replace_confirm.message",
+                                orig_w=self.current_texture_data.m_Width, orig_h=self.current_texture_data.m_Height,
+                                new_w=target_width, new_h=target_height)
+                    transparency_msg += "\n" + localization.get_string("image_editor.replace_confirm.transparency_question")
                     
-                    if resized_img.mode != 'RGBA':
-                        # 새 이미지에 투명도가 없는 경우
-                        transparency_msg = localization.get_string("image_editor.replace_confirm.message",
-                                    orig_w=self.current_texture_data.m_Width, orig_h=self.current_texture_data.m_Height,
-                                    new_w=target_width, new_h=target_height)
-                        transparency_msg += "\n" + localization.get_string("image_editor.replace_confirm.transparency_question")
-                        apply_transparency = True
-                    else:
-                        # 두 이미지 모두 투명도가 있는 경우
-                        transparency_msg = localization.get_string("image_editor.replace_confirm.message",
-                                    orig_w=self.current_texture_data.m_Width, orig_h=self.current_texture_data.m_Height,
-                                    new_w=target_width, new_h=target_height)
-                        transparency_msg += "\n" + localization.get_string("image_editor.replace_confirm.transparency_question")
-                        apply_transparency = True
-                        
-                    if apply_transparency:
-                        # 투명도 적용 옵션 대화상자
-                        reply = QMessageBox.question(
-                            self, localization.get_string("image_editor.replace_confirm.title"), transparency_msg,
-                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-                        )
-                        
-                        if reply == QMessageBox.Yes:
-                            # 원본 이미지 크기를 대상에 맞게 조정
-                            if self.original_texture_image.size != (target_width, target_height):
-                                original_resized = self.original_texture_image.resize((target_width, target_height), Image.LANCZOS)
-                            else:
-                                original_resized = self.original_texture_image
-                                
-                            # 투명도 복사
-                            resized_img = self._copy_transparency(original_resized, resized_img)
+                    # 투명도 적용 옵션 대화상자 (항상 표시)
+                    reply = QMessageBox.question(
+                        self, localization.get_string("image_editor.replace_confirm.title"), transparency_msg,
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                    )
+                    
+                    if reply == QMessageBox.Yes:
+                        # 원본 이미지 크기를 대상에 맞게 조정
+                        if self.original_texture_image.size != (target_width, target_height):
+                            original_resized = self.original_texture_image.resize((target_width, target_height), Image.LANCZOS)
+                        else:
+                            original_resized = self.original_texture_image
+                            
+                        # 투명도 복사
+                        resized_img = self._copy_transparency(original_resized, resized_img)
                 
                 # 임시 파일로 저장
                 file_name = os.path.basename(self.new_image_path)

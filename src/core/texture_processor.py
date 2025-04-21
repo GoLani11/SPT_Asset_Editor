@@ -455,12 +455,16 @@ class TextureProcessor:
         Returns:
             bool: 교체 성공 여부
         """
+        data = None  # data 변수 초기화
+        original_format = None # 원본 포맷 저장 변수 초기화
+        
         try:
             # 새 이미지 로드
             new_image = Image.open(new_image_path)
             
             # 텍스처 데이터 읽기 (texture_data 파라미터 활용)
             data = texture_obj.read() if texture_data is None else texture_data
+            original_format = data.m_TextureFormat # 원본 포맷 저장
             
             # 원본 이미지 크기 확인
             original_width = data.m_Width
@@ -468,20 +472,54 @@ class TextureProcessor:
             
             # 원본 이미지 크기에 맞게 리사이징
             if (original_width != new_image.width or original_height != new_image.height):
-                print(f"이미지 리사이징: {new_image.width}x{new_image.height} -> {original_width}x{original_height}")
+                logger.info(f"이미지 리사이징: {new_image.width}x{new_image.height} -> {original_width}x{original_height}")
                 new_image = new_image.resize((original_width, original_height), Image.LANCZOS)
             
-            # 이미지 데이터 교체
-            data.image = new_image
-            
-            # 변경사항 저장
-            data.save()
-            
-            return True
-        except Exception as e:
-            print(f"텍스처 교체 오류: {str(e)}")
+            # 1차 시도: 원본 포맷으로 저장
+            try:
+                logger.info(f"텍스처 '{data.m_Name}' 교체 시도 (원본 포맷: {original_format})")
+                data.image = new_image
+                data.save()
+                logger.info(f"텍스처 '{data.m_Name}' 교체 성공 (원본 포맷: {original_format})")
+                return True
+            except Exception as e:
+                logger.warning(f"원본 포맷({original_format}) 저장 실패: {str(e)}. DXT5 포맷으로 재시도합니다.")
+                # DXT5 저장으로 넘어감
+
+            # 2차 시도: DXT5 포맷으로 저장
+            try:
+                logger.info(f"텍스처 '{data.m_Name}' 교체 재시도 (DXT5 포맷)")
+                
+                # DXT5는 RGBA만 지원하므로, 모드 변환
+                if new_image.mode != 'RGBA':
+                    logger.info(f"DXT5 저장을 위해 이미지를 RGBA 모드로 변환합니다: {new_image.mode} -> RGBA")
+                    new_image = new_image.convert('RGBA')
+
+                # 포맷 변경 및 저장 시도
+                data.m_TextureFormat = 12  # TextureFormat.DXT5 (BC3)
+                data.image = new_image # 이미지 다시 할당 (모드 변환 가능성 있음)
+                data.save()
+                logger.info(f"텍스처 '{data.m_Name}' 교체 성공 (DXT5 포맷으로 저장됨)")
+                return True
+            except Exception as e2:
+                logger.error(f"DXT5 포맷 저장 실패: {str(e2)}")
+                # 최종 실패 시 원래 오류를 출력하거나 False 반환
+                print(f"텍스처 교체 오류 (원본 및 DXT5 모두 실패): 원본오류={str(e)}, DXT5오류={str(e2)}")
+                # 실패 시 원본 포맷으로 되돌릴 필요는 없음 (어차피 저장 실패)
+                return False
+
+        except Exception as e_outer:
+            # 이미지 로드, 데이터 읽기 등 초기 단계 오류 처리
+            error_msg = f"텍스처 교체 준비 중 오류: {str(e_outer)}"
+            if data and hasattr(data, 'm_Name'):
+                error_msg = f"텍스처 '{data.m_Name}' 교체 준비 중 오류: {str(e_outer)}"
+            elif original_format:
+                 error_msg = f"텍스처 (원본 포맷: {original_format}) 교체 준비 중 오류: {str(e_outer)}"
+
+            logger.error(error_msg)
+            print(error_msg) # 콘솔에도 출력
             return False
-    
+
     def restore_texture(self, texture_obj: Any, original_image: Image.Image) -> bool:
         """
         Texture2D 객체의 이미지를 원본 이미지로 복원합니다.

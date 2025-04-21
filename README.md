@@ -1,9 +1,5 @@
 # SPT 타르코프 에셋 에디터
 
-🌎 **[English](./README.en.md)** | 🇰🇷 **[한국어](./README.md)**
-
----
-
 SPT 타르코프(Escape From Tarkov) 게임의 `.assets`, `.bundle` 파일에서 텍스처(Texture2D) 이미지를 추출, 미리보기, 수정 및 복원할 수 있는 도구입니다.
 
 ## 기능
@@ -81,15 +77,6 @@ SPT 타르코프(Escape From Tarkov) 게임의 `.assets`, `.bundle` 파일에서
 
 1. "원본 복원" 버튼을 클릭하여 수정된 텍스처를 원래 상태로 복원할 수 있습니다.
 2. 복원은 가장 최근에 저장된 백업 파일에서 이루어집니다.
-
-### 포스트 아이템 이미지 변경
-
-1. 에셋 브라우저 상단의 "포스트 아이템 이미지 변경" 버튼을 클릭합니다.
-2. 안내 메시지를 확인 후, SPT 게임이 설치된 폴더를 선택합니다.
-3. 프로그램이 자동으로 `EscapeFromTarkov_Data\StreamingAssets\Windows\assets\content\items\barter\item_barter_flyers` 폴더에서 번들 파일들을 찾습니다.
-4. 번들 파일 목록이 나타나면, 수정하고 싶은 파일(예: `item_barter_flyers_letter*****`)을 선택하고 '확인'을 누릅니다.
-5. 선택한 번들 파일 내의 텍스처들이 에셋 브라우저에 표시됩니다.
-6. 이후 과정은 일반적인 "텍스처 수정" 방법과 동일하게 진행합니다.
 
 ## 주의사항
 

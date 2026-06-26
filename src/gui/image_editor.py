@@ -306,8 +306,10 @@ class ImageEditor(QWidget):
                 # 이미지 모드에 따라 적절한 QImage 포맷 사용
                 width, height = img.size
                 
-                if img.mode == 'RGBA':
+                if self._has_alpha(img):
                     # RGBA 모드일 경우 알파 채널 포함하여 변환
+                    if img.mode != 'RGBA':
+                        img = img.convert('RGBA')
                     bytes_per_line = 4 * width
                     q_format = QImage.Format_RGBA8888
                     img_data = img.tobytes('raw', 'RGBA')
@@ -419,20 +421,30 @@ class ImageEditor(QWidget):
         # 최종 크기로 조정
         return image.resize((target_width, target_height), Image.LANCZOS)
     
+    def _has_alpha(self, img):
+        """이미지가 실제 투명도를 가질 수 있는지 확인합니다."""
+        if not img:
+            return False
+        if 'A' in img.getbands():
+            return True
+        return 'transparency' in getattr(img, 'info', {})
+
     def _copy_transparency(self, source_img, target_img):
         """
         원본 이미지의 투명도를 대상 이미지에 적용합니다.
         
         Args:
-            source_img: 원본 이미지 (투명도 포함, RGBA 모드)
+            source_img: 원본 이미지 (투명도 포함)
             target_img: 대상 이미지 (RGB 또는 RGBA 모드)
             
         Returns:
             Image: 투명도가 적용된 대상 이미지
         """
         # 원본 이미지가 투명도를 가지고 있지 않으면 그대로 반환
-        if source_img.mode != 'RGBA':
+        if not self._has_alpha(source_img):
             return target_img
+        if source_img.mode != 'RGBA':
+            source_img = source_img.convert('RGBA')
         
         # 원본 이미지의 알파 채널 추출
         alpha_channel = source_img.split()[3]  # 알파 채널 추출
@@ -446,7 +458,9 @@ class ImageEditor(QWidget):
             # RGBA 모드인 경우 처음 3개 채널만 사용
             r, g, b, _ = target_img.split()
         else:
-            # RGB 모드인 경우 먼저 RGBA로 변환
+            # RGB가 아니면 먼저 RGB로 변환
+            if target_img.mode != 'RGB':
+                target_img = target_img.convert('RGB')
             r, g, b = target_img.split()
             
         # 새 이미지 생성 (RGB 채널은 대상 이미지에서, 알파 채널은 원본 이미지에서)
@@ -529,41 +543,22 @@ class ImageEditor(QWidget):
                 # 최적화된 리사이징 적용
                 resized_img = self._optimize_resize(img, target_width, target_height)
                 
-                # 원본 이미지의 투명도 확인 및 적용
-                if self.original_texture_image and self.original_texture_image.mode == 'RGBA':
-                    apply_transparency = False
-                    
-                    if resized_img.mode != 'RGBA':
-                        # 새 이미지에 투명도가 없는 경우
-                        transparency_msg = localization.get_string("image_editor.replace_confirm.message",
-                                    orig_w=self.current_texture_data.m_Width, orig_h=self.current_texture_data.m_Height,
-                                    new_w=target_width, new_h=target_height)
-                        transparency_msg += "\n" + localization.get_string("image_editor.replace_confirm.transparency_question")
-                        apply_transparency = True
-                    else:
-                        # 두 이미지 모두 투명도가 있는 경우
-                        transparency_msg = localization.get_string("image_editor.replace_confirm.message",
-                                    orig_w=self.current_texture_data.m_Width, orig_h=self.current_texture_data.m_Height,
-                                    new_w=target_width, new_h=target_height)
-                        transparency_msg += "\n" + localization.get_string("image_editor.replace_confirm.transparency_question")
-                        apply_transparency = True
-                        
-                    if apply_transparency:
-                        # 투명도 적용 옵션 대화상자
-                        reply = QMessageBox.question(
-                            self, localization.get_string("image_editor.replace_confirm.title"), transparency_msg,
-                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-                        )
-                        
-                        if reply == QMessageBox.Yes:
-                            # 원본 이미지 크기를 대상에 맞게 조정
-                            if self.original_texture_image.size != (target_width, target_height):
-                                original_resized = self.original_texture_image.resize((target_width, target_height), Image.LANCZOS)
-                            else:
-                                original_resized = self.original_texture_image
-                                
-                            # 투명도 복사
-                            resized_img = self._copy_transparency(original_resized, resized_img)
+                # 원본 텍스처에 알파(투명도)가 있고, 새 이미지에는 알파가 없을 때만 질문.
+                # 새 이미지가 이미 RGBA면 사용자가 직접 만든 알파이므로 그대로 사용(덮어쓰지 않음).
+                # 이전 버전 버그: 새 이미지에 알파가 있어도 "예"가 원본 알파로 덮어써서 사용자 알파가 사라짐.
+                if self._has_alpha(self.original_texture_image) and not self._has_alpha(resized_img):
+                    reply = QMessageBox.question(
+                        self, localization.get_string("image_editor.replace_confirm.title"),
+                        localization.get_string("image_editor.replace_confirm.transparency_question"),
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes  # 원본에 알파가 있었으니 기본값 "예"
+                    )
+                    if reply == QMessageBox.Yes:
+                        # 원본 알파를 새 이미지 크기에 맞춰 입힘
+                        if self.original_texture_image.size != (target_width, target_height):
+                            original_resized = self.original_texture_image.resize((target_width, target_height), Image.LANCZOS)
+                        else:
+                            original_resized = self.original_texture_image
+                        resized_img = self._copy_transparency(original_resized, resized_img)
                 
                 # 임시 파일로 저장
                 file_name = os.path.basename(self.new_image_path)
@@ -598,10 +593,11 @@ class ImageEditor(QWidget):
             
             # 리사이징된 이미지로 텍스처 교체
             if self.resized_image_path and os.path.exists(self.resized_image_path):
-                # 텍스처 교체
-                self.texture_processor.replace_texture(
+                # 텍스처 교체 (실패하면 조용히 넘어가지 않고 아래 except에서 오류 표시)
+                if not self.texture_processor.replace_texture(
                     self.current_texture_obj, self.current_texture_data, self.resized_image_path
-                )
+                ):
+                    raise Exception(localization.get_string("image_editor.replace_failed.message"))
                 
                 # 교체 완료 100%
                 self.resize_progress.setValue(100)

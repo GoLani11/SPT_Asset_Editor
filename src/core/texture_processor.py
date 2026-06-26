@@ -475,31 +475,32 @@ class TextureProcessor:
                 logger.info(f"이미지 리사이징: {new_image.width}x{new_image.height} -> {original_width}x{original_height}")
                 new_image = new_image.resize((original_width, original_height), Image.LANCZOS)
             
-            # 1차 시도: 원본 포맷으로 저장
+            # 인코더는 RGBA 바이트를 기대함 → 팔레트(P)·흑백(L) 등은 RGBA로 통일 (안전장치)
+            if new_image.mode != 'RGBA':
+                new_image = new_image.convert('RGBA')
+
+            # 원본 밉맵 개수 유지 (최소 1). set_image가 포맷·밉맵·CompleteImageSize·StreamData를 함께 갱신함
+            mip_count = max(1, int(getattr(data, 'm_MipCount', 1) or 1))
+
+            # 1차 시도: 원본 포맷 그대로 재인코딩.
+            # data.image= 가 아니라 set_image(target_format=)를 써야 원본 포맷(BC7/DXT 등)이 유지됨.
+            # 핵심 수정: 밝아짐/보라색/밉맵 불일치/조용한 실패의 뿌리. (구버전 UnityPy는 image setter가 RGBA32로 덮어씀)
             try:
-                logger.info(f"텍스처 '{data.m_Name}' 교체 시도 (원본 포맷: {original_format})")
-                data.image = new_image
+                logger.info(f"텍스처 '{data.m_Name}' 교체 시도 (원본 포맷: {original_format}, 밉맵: {mip_count})")
+                data.set_image(new_image, target_format=original_format, mipmap_count=mip_count)
                 data.save()
-                logger.info(f"텍스처 '{data.m_Name}' 교체 성공 (원본 포맷: {original_format})")
+                logger.info(f"텍스처 '{data.m_Name}' 교체 성공 (원본 포맷 유지: {original_format})")
                 return True
             except Exception as e:
                 logger.warning(f"원본 포맷({original_format}) 저장 실패: {str(e)}. DXT5 포맷으로 재시도합니다.")
                 # DXT5 저장으로 넘어감
 
-            # 2차 시도: DXT5 포맷으로 저장
+            # 2차 시도: DXT5(BC3) 폴백 — 원본 포맷 재인코딩이 불가한 경우에만
             try:
-                logger.info(f"텍스처 '{data.m_Name}' 교체 재시도 (DXT5 포맷)")
-                
-                # DXT5는 RGBA만 지원하므로, 모드 변환
-                if new_image.mode != 'RGBA':
-                    logger.info(f"DXT5 저장을 위해 이미지를 RGBA 모드로 변환합니다: {new_image.mode} -> RGBA")
-                    new_image = new_image.convert('RGBA')
-
-                # 포맷 변경 및 저장 시도
-                data.m_TextureFormat = 12  # TextureFormat.DXT5 (BC3)
-                data.image = new_image # 이미지 다시 할당 (모드 변환 가능성 있음)
+                logger.info(f"텍스처 '{data.m_Name}' 교체 재시도 (DXT5 폴백)")
+                data.set_image(new_image, target_format=12, mipmap_count=mip_count)  # 12 = TextureFormat.DXT5
                 data.save()
-                logger.info(f"텍스처 '{data.m_Name}' 교체 성공 (DXT5 포맷으로 저장됨)")
+                logger.info(f"텍스처 '{data.m_Name}' 교체 성공 (DXT5 폴백으로 저장됨)")
                 return True
             except Exception as e2:
                 logger.error(f"DXT5 포맷 저장 실패: {str(e2)}")

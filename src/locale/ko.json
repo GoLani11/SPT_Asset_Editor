@@ -132,7 +132,8 @@
     "image_editor.resize_info_label": "원본 해상도에 맞게 자동으로 리사이징됩니다.",
 
     "image_editor.path_label_selected": "선택된 이미지: {path}",
-    "image_editor.replace_confirm.transparency_question": "원본 텍스처에는 투명도가 있습니다. 새 이미지에 이 투명도를 적용하시겠습니까?",
+    "image_editor.replace_confirm.transparency_question": "새 이미지에 투명도(알파 채널)가 없습니다.\n원본 텍스처의 투명 영역을 새 이미지에 입힐까요?\n\n예: 원본의 투명/반투명 부분을 그대로 유지\n아니오: 전체 불투명으로 교체",
+    "image_editor.replace_failed.message": "텍스처 교체에 실패했습니다. 원본 포맷과 DXT5 모두 저장하지 못했습니다.\n로그를 확인하세요.",
     "image_editor.restore_no_file.title": "파일 없음",
     "image_editor.restore_no_file.message": "원본으로 복원할 파일이 로드되지 않았습니다.",
 
